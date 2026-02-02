@@ -1,0 +1,361 @@
+/* SessionList - Neo4j Inspired Design */
+
+.session-list-container {
+    padding: 2rem;
+    max-width: 1400px;
+    margin: 0 auto;
+    color: var(--neo-text-primary);
+    min-height: 100%;
+    background: var(--neo-bg-deep);
+}
+
+.session-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 2.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--neo-border-subtle);
+}
+
+.session-list-header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0;
+    background: linear-gradient(135deg, var(--neo-cyan) 0%, var(--neo-purple) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.02em;
+}
+
+.session-list-header p {
+    color: var(--neo-text-secondary);
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.btn-new-session {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    background: linear-gradient(135deg, var(--neo-cyan) 0%, #4BA8C7 100%);
+    border: none;
+    border-radius: var(--neo-radius-md);
+    color: #000;
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: var(--neo-transition);
+    box-shadow: var(--neo-shadow-md);
+}
+
+.btn-new-session:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--neo-shadow-lg), var(--neo-shadow-glow);
+}
+
+/* Sessions Grid */
+.sessions-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+}
+
+@media (max-width: 1200px) {
+    .sessions-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .sessions-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Session Card - Premium Neo4j Style */
+.session-card {
+    background: linear-gradient(180deg, var(--neo-bg-secondary) 0%, var(--neo-bg-primary) 100%);
+    border-radius: var(--neo-radius-lg);
+    border: 1px solid var(--neo-border-subtle);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    transition: var(--neo-transition);
+    position: relative;
+    overflow: hidden;
+}
+
+.session-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--neo-cyan), var(--neo-purple), var(--neo-cyan));
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.session-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--neo-cyan);
+    box-shadow: var(--neo-shadow-lg), 0 0 30px rgba(87, 199, 227, 0.1);
+}
+
+.session-card:hover::before {
+    opacity: 1;
+}
+
+.session-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.session-icon {
+    width: 44px;
+    height: 44px;
+    background: var(--neo-cyan-dim);
+    border-radius: var(--neo-radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--neo-cyan);
+    border: 1px solid rgba(87, 199, 227, 0.2);
+}
+
+.session-status {
+    padding: 0.3rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #000;
+}
+
+.session-card-body h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+    letter-spacing: -0.01em;
+}
+
+.session-udi {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    color: var(--neo-text-secondary);
+    background: var(--neo-bg-deep);
+    padding: 0.3rem 0.6rem;
+    border-radius: var(--neo-radius-sm);
+    font-size: 0.75rem;
+    display: inline-block;
+    margin-top: 0.5rem;
+    border: 1px solid var(--neo-border-subtle);
+}
+
+.session-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.meta-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--neo-text-muted);
+    font-size: 0.8rem;
+}
+
+.meta-item svg {
+    color: var(--neo-cyan);
+    opacity: 0.7;
+}
+
+/* Progress Bar in Card */
+.session-card .progress-bar {
+    background: var(--neo-bg-deep);
+    height: 4px;
+    border-radius: 2px;
+    margin-top: 1rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--neo-cyan), var(--neo-green));
+    border-radius: 2px;
+    transition: width 0.5s ease;
+    position: relative;
+}
+
+.progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 20px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3));
+}
+
+.progress-text {
+    position: absolute;
+    right: 0;
+    top: -18px;
+    font-size: 0.7rem;
+    color: var(--neo-text-muted);
+}
+
+/* Card Footer */
+.session-card-footer {
+    margin-top: auto;
+    display: flex;
+    gap: 0.75rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--neo-border-subtle);
+}
+
+.btn-secondary {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.6rem;
+    background: var(--neo-bg-tertiary);
+    border: 1px solid var(--neo-border);
+    border-radius: var(--neo-radius-md);
+    color: var(--neo-text-primary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: var(--neo-transition);
+}
+
+.btn-secondary:hover {
+    background: var(--neo-bg-elevated);
+    border-color: var(--neo-cyan);
+    color: var(--neo-cyan);
+}
+
+.btn-download {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.6rem;
+    background: var(--neo-green);
+    border-radius: var(--neo-radius-md);
+    color: #000;
+    text-decoration: none;
+    transition: var(--neo-transition);
+    width: 40px;
+    border: none;
+}
+
+.btn-download:hover {
+    background: #9FD9A4;
+    transform: scale(1.05);
+}
+
+.btn-delete {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.6rem;
+    background: transparent;
+    border: 1px solid var(--neo-border);
+    border-radius: var(--neo-radius-md);
+    color: var(--neo-text-muted);
+    cursor: pointer;
+    transition: var(--neo-transition);
+    width: 40px;
+}
+
+.btn-delete:hover {
+    background: rgba(241, 102, 103, 0.1);
+    border-color: var(--neo-red);
+    color: var(--neo-red);
+}
+
+/* Empty State */
+.empty-state {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 4rem;
+    background: linear-gradient(180deg, var(--neo-bg-secondary) 0%, var(--neo-bg-primary) 100%);
+    border-radius: var(--neo-radius-xl);
+    border: 2px dashed var(--neo-border);
+    text-align: center;
+}
+
+.empty-state svg {
+    color: var(--neo-cyan);
+    opacity: 0.3;
+}
+
+.empty-state h3 {
+    margin: 1.5rem 0 0.5rem;
+    font-size: 1.25rem;
+    color: var(--neo-text-primary);
+}
+
+.empty-state p {
+    color: var(--neo-text-muted);
+    margin-bottom: 1.5rem;
+}
+
+.empty-state .btn-primary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 2rem;
+    background: linear-gradient(135deg, var(--neo-cyan) 0%, #4BA8C7 100%);
+    border: none;
+    border-radius: var(--neo-radius-md);
+    color: #000;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--neo-transition);
+}
+
+.empty-state .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--neo-shadow-glow);
+}
+
+/* Loading State */
+.loading-spinner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--neo-text-muted);
+    font-size: 0.9rem;
+}
+
+.loading-spinner::before {
+    content: '';
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--neo-border);
+    border-top-color: var(--neo-cyan);
+    border-radius: 50%;
+    margin-right: 0.75rem;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}

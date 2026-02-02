@@ -1,0 +1,257 @@
+/* SessionSetup - Neo4j Inspired Design */
+
+.session-setup-card {
+    background: linear-gradient(180deg, var(--neo-bg-secondary) 0%, var(--neo-bg-primary) 100%);
+    border-radius: var(--neo-radius-lg);
+    padding: 2rem;
+    box-shadow: var(--neo-shadow-lg);
+    border: 1px solid var(--neo-border-subtle);
+    max-width: 900px;
+    margin: 2rem auto;
+    color: var(--neo-text-primary);
+    position: relative;
+    overflow: hidden;
+}
+
+.session-setup-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--neo-cyan), var(--neo-purple), var(--neo-orange));
+}
+
+.setup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--neo-border-subtle);
+}
+
+.setup-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    background: linear-gradient(135deg, var(--neo-cyan) 0%, var(--neo-purple) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.setup-header span {
+    font-size: 0.7rem;
+    color: var(--neo-text-muted);
+    background: var(--neo-bg-deep);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--neo-radius-sm);
+}
+
+.setup-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+/* Form Grid */
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.form-group label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--neo-text-muted);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+}
+
+.form-input {
+    background: var(--neo-bg-deep);
+    border: 1px solid var(--neo-border);
+    color: var(--neo-text-primary);
+    padding: 0.85rem 1rem;
+    border-radius: var(--neo-radius-md);
+    font-size: 0.9rem;
+    transition: var(--neo-transition);
+    font-family: inherit;
+}
+
+.form-input:focus {
+    border-color: var(--neo-cyan);
+    box-shadow: 0 0 0 3px var(--neo-cyan-dim);
+    outline: none;
+}
+
+.form-input::placeholder {
+    color: var(--neo-text-dim);
+}
+
+/* File Upload Section */
+.file-upload-section {
+    grid-column: span 2;
+}
+
+.drop-zone {
+    border: 2px dashed var(--neo-border);
+    background: var(--neo-bg-deep);
+    border-radius: var(--neo-radius-lg);
+    padding: 2rem;
+    text-align: center;
+    transition: var(--neo-transition);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.drop-zone:hover,
+.drop-zone.active {
+    border-color: var(--neo-cyan);
+    background: var(--neo-cyan-dim);
+    box-shadow: inset 0 0 30px rgba(87, 199, 227, 0.05);
+}
+
+.upload-icon {
+    color: var(--neo-cyan);
+    opacity: 0.8;
+}
+
+.upload-text {
+    font-size: 0.9rem;
+    color: var(--neo-text-secondary);
+}
+
+.upload-subtext {
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+}
+
+/* File List */
+.file-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.file-item {
+    background: var(--neo-bg-tertiary);
+    border: 1px solid var(--neo-border-subtle);
+    padding: 0.6rem 0.9rem;
+    border-radius: var(--neo-radius-md);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.8rem;
+    transition: var(--neo-transition);
+}
+
+.file-item:hover {
+    border-color: var(--neo-cyan);
+}
+
+.file-item svg {
+    color: var(--neo-cyan);
+    flex-shrink: 0;
+}
+
+.file-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--neo-text-primary);
+}
+
+.remove-file {
+    background: none;
+    border: none;
+    color: var(--neo-red);
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--neo-radius-sm);
+    transition: var(--neo-transition);
+}
+
+.remove-file:hover {
+    background: rgba(241, 102, 103, 0.15);
+}
+
+/* Form Actions */
+.form-actions {
+    grid-column: span 2;
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    margin-top: 0.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--neo-border-subtle);
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--neo-cyan) 0%, #4BA8C7 100%);
+    color: #000;
+    border: none;
+    padding: 0.85rem 2rem;
+    border-radius: var(--neo-radius-md);
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    transition: var(--neo-transition);
+    box-shadow: var(--neo-shadow-md);
+}
+
+.btn-primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: var(--neo-shadow-lg), var(--neo-shadow-glow);
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-secondary {
+    background: var(--neo-bg-tertiary);
+    color: var(--neo-text-secondary);
+    border: 1px solid var(--neo-border);
+    padding: 0.85rem 1.5rem;
+    border-radius: var(--neo-radius-md);
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: var(--neo-transition);
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: var(--neo-bg-elevated);
+    border-color: var(--neo-cyan);
+    color: var(--neo-text-primary);
+}
+
+.btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

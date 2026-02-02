@@ -1,0 +1,287 @@
+/* 
+ * Global Styles - Neo4j Inspired Design System
+ * Multi-Agent PSUR System
+ */
+
+/* Font Imports */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* CSS Variables - Neo4j Color Palette */
+:root {
+    /* Backgrounds */
+    --neo-bg-deep: #0B0D11;
+    --neo-bg-primary: #101318;
+    --neo-bg-secondary: #151515;
+    --neo-bg-tertiary: #1A1A1A;
+    --neo-bg-elevated: #202428;
+    
+    /* Accent Colors */
+    --neo-cyan: #57C7E3;
+    --neo-cyan-dim: rgba(87, 199, 227, 0.15);
+    --neo-cyan-glow: rgba(87, 199, 227, 0.3);
+    --neo-orange: #F79767;
+    --neo-green: #8DCC93;
+    --neo-red: #F16667;
+    --neo-yellow: #FFE081;
+    --neo-purple: #9B8FE8;
+    
+    /* Text */
+    --neo-text-primary: #E2E8F0;
+    --neo-text-secondary: #94A3B8;
+    --neo-text-muted: #64748B;
+    --neo-text-dim: #475569;
+    
+    /* Borders */
+    --neo-border: #2D3139;
+    --neo-border-subtle: #1E2127;
+    
+    /* Radius */
+    --neo-radius-sm: 4px;
+    --neo-radius-md: 8px;
+    --neo-radius-lg: 12px;
+    --neo-radius-xl: 16px;
+    
+    /* Shadows */
+    --neo-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --neo-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --neo-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --neo-shadow-glow: 0 0 20px rgba(87, 199, 227, 0.15);
+    
+    /* Transitions */
+    --neo-transition: all 0.2s ease;
+}
+
+/* Reset & Base */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    background-color: var(--neo-bg-deep);
+    color: var(--neo-text-primary);
+    line-height: 1.5;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+#root {
+    min-height: 100vh;
+}
+
+/* Selection */
+::selection {
+    background: var(--neo-cyan);
+    color: #000;
+}
+
+/* Focus Styles */
+:focus-visible {
+    outline: 2px solid var(--neo-cyan);
+    outline-offset: 2px;
+}
+
+/* Links */
+a {
+    color: var(--neo-cyan);
+    text-decoration: none;
+    transition: var(--neo-transition);
+}
+
+a:hover {
+    color: #6DD3F0;
+}
+
+/* Buttons Base */
+button {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    background: none;
+}
+
+/* Inputs Base */
+input,
+textarea,
+select {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+    background: var(--neo-bg-deep);
+    border: 1px solid var(--neo-border);
+    border-radius: var(--neo-radius-md);
+    padding: 0.75rem 1rem;
+    transition: var(--neo-transition);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+    outline: none;
+    border-color: var(--neo-cyan);
+    box-shadow: 0 0 0 3px var(--neo-cyan-dim);
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--neo-text-dim);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--neo-border);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--neo-text-muted);
+}
+
+/* Code */
+code,
+pre {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+code {
+    background: var(--neo-bg-tertiary);
+    padding: 0.15rem 0.4rem;
+    border-radius: var(--neo-radius-sm);
+    font-size: 0.85em;
+    color: var(--neo-orange);
+}
+
+pre {
+    background: var(--neo-bg-secondary);
+    padding: 1rem;
+    border-radius: var(--neo-radius-md);
+    overflow-x: auto;
+    border: 1px solid var(--neo-border-subtle);
+}
+
+pre code {
+    background: transparent;
+    padding: 0;
+    color: var(--neo-text-primary);
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--neo-text-primary);
+}
+
+h1 { font-size: 2rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.25rem; }
+h4 { font-size: 1rem; }
+h5 { font-size: 0.875rem; }
+h6 { font-size: 0.75rem; }
+
+/* Paragraph */
+p {
+    margin-bottom: 1rem;
+}
+
+p:last-child {
+    margin-bottom: 0;
+}
+
+/* Lists */
+ul, ol {
+    padding-left: 1.5rem;
+}
+
+li {
+    margin-bottom: 0.5rem;
+}
+
+/* Tables */
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--neo-border-subtle);
+}
+
+th {
+    font-weight: 600;
+    color: var(--neo-text-secondary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Utility Classes */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Animation Utilities */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.animate-fadeIn { animation: fadeIn 0.3s ease-out; }
+.animate-slideUp { animation: slideUp 0.3s ease-out; }
+.animate-slideDown { animation: slideDown 0.3s ease-out; }
+.animate-pulse { animation: pulse 2s ease-in-out infinite; }
+.animate-spin { animation: spin 1s linear infinite; }

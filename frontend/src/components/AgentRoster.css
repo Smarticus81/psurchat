@@ -1,0 +1,287 @@
+/* AgentRoster - Neo4j Inspired Design */
+
+.agent-roster {
+    padding: 1rem;
+    height: 100%;
+    overflow-y: auto;
+    background: var(--neo-bg-deep);
+}
+
+.roster-header {
+    padding: 0.5rem 0 1rem;
+    border-bottom: 1px solid var(--neo-border-subtle);
+    margin-bottom: 1rem;
+}
+
+.roster-header h3 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--neo-text-muted);
+    margin: 0;
+    font-weight: 600;
+}
+
+.agent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Agent Card */
+.agent-card {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: var(--neo-bg-primary);
+    border: 1px solid var(--neo-border-subtle);
+    border-radius: var(--neo-radius-md);
+    transition: var(--neo-transition);
+    cursor: pointer;
+}
+
+.agent-card:hover {
+    background: var(--neo-bg-secondary);
+    border-color: var(--neo-border);
+}
+
+.agent-card.active {
+    border-color: var(--neo-cyan);
+    background: var(--neo-cyan-dim);
+}
+
+/* Agent Avatar */
+.agent-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.agent-avatar.orchestrator {
+    background: linear-gradient(135deg, var(--neo-cyan), var(--neo-purple));
+    color: #000;
+}
+
+.agent-avatar.qc {
+    background: var(--neo-red);
+    color: #fff;
+}
+
+.agent-avatar.writer {
+    background: var(--neo-orange);
+    color: #000;
+}
+
+.agent-avatar.synthesis {
+    background: var(--neo-yellow);
+    color: #000;
+}
+
+.agent-avatar.data {
+    background: var(--neo-green);
+    color: #000;
+}
+
+/* Status Indicator */
+.status-indicator {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--neo-bg-primary);
+}
+
+.status-indicator.working {
+    background: var(--neo-cyan);
+    animation: pulse-status 1.5s ease-in-out infinite;
+}
+
+.status-indicator.complete {
+    background: var(--neo-green);
+}
+
+.status-indicator.waiting {
+    background: var(--neo-yellow);
+}
+
+.status-indicator.idle {
+    background: var(--neo-text-dim);
+}
+
+.status-indicator.error {
+    background: var(--neo-red);
+}
+
+@keyframes pulse-status {
+    0%, 100% { 
+        opacity: 1;
+        box-shadow: 0 0 0 0 rgba(87, 199, 227, 0.4);
+    }
+    50% { 
+        opacity: 0.8;
+        box-shadow: 0 0 0 4px rgba(87, 199, 227, 0);
+    }
+}
+
+/* Agent Info */
+.agent-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.agent-name {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+    margin-bottom: 0.15rem;
+}
+
+.agent-role {
+    font-size: 0.7rem;
+    color: var(--neo-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Agent Status Badge */
+.agent-status-badge {
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.2rem 0.5rem;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.agent-status-badge.working {
+    background: var(--neo-cyan-dim);
+    color: var(--neo-cyan);
+}
+
+.agent-status-badge.complete {
+    background: rgba(141, 204, 147, 0.15);
+    color: var(--neo-green);
+}
+
+.agent-status-badge.waiting {
+    background: rgba(255, 224, 129, 0.15);
+    color: var(--neo-yellow);
+}
+
+.agent-status-badge.idle {
+    background: var(--neo-bg-tertiary);
+    color: var(--neo-text-dim);
+}
+
+.agent-status-badge.error {
+    background: rgba(241, 102, 103, 0.15);
+    color: var(--neo-red);
+}
+
+/* Agent Details Panel */
+.agent-details {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--neo-border-subtle);
+}
+
+.agent-details h4 {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--neo-text-muted);
+    margin-bottom: 0.75rem;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--neo-border-subtle);
+}
+
+.detail-row:last-child {
+    border-bottom: none;
+}
+
+.detail-label {
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+}
+
+.detail-value {
+    font-size: 0.75rem;
+    color: var(--neo-text-primary);
+    font-weight: 500;
+}
+
+/* Model Badge */
+.model-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.65rem;
+    background: var(--neo-bg-tertiary);
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--neo-radius-sm);
+    color: var(--neo-cyan);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Progress Section */
+.progress-section {
+    margin-top: 1.5rem;
+}
+
+.progress-section h4 {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--neo-text-muted);
+    margin-bottom: 0.75rem;
+}
+
+.section-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.section-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--neo-bg-primary);
+    border-radius: var(--neo-radius-sm);
+    font-size: 0.75rem;
+}
+
+.section-item.complete {
+    color: var(--neo-green);
+}
+
+.section-item.in-progress {
+    color: var(--neo-cyan);
+}
+
+.section-item.pending {
+    color: var(--neo-text-dim);
+}
+
+.section-item svg {
+    flex-shrink: 0;
+}

@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite3
+migrations/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Uploaded files
+uploads/
+temp/
+
+# Node (frontend)
+node_modules/
+.next/
+out/
+dist/
+.cache/
+
+# Testing
+.pytest_cache/
+coverage/
+htmlcov/
+.coverage
+
+# MCP servers temp
+mcp_cache/
