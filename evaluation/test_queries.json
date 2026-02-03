@@ -1,0 +1,38 @@
+{
+  "queries": [
+    {
+      "id": "q1",
+      "query": "Generate a complete PSUR for the ZyMot Multi Sperm Separation Device covering the reporting period January 2021 to February 2025.",
+      "context": "Medical device: ZyMot Multi Sperm Separation Device (850uL and 3mL variants). Manufacturer: CooperSurgical, Inc. Sales data: 621,217 units distributed globally. Complaints: 73 total. Notified Body: BSI Group (2797). Certificate: 768179.",
+      "expected_sections": ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"],
+      "ground_truth_file": "PSUR141_Zymot_2025.md",
+      "key_data_points": {
+        "total_devices": 621217,
+        "total_complaints": 73,
+        "complaint_rate": "0.012%",
+        "serious_incidents": 0,
+        "fscas": 0,
+        "open_capas": 1,
+        "benefit_risk": "favorable, unchanged"
+      }
+    },
+    {
+      "id": "q2",
+      "query": "Generate the Executive Summary (Section A) for the ZyMot PSUR including benefit-risk assessment conclusion.",
+      "context": "Initial PSUR following CooperSurgical acquisition in 2024. CAPA 22-005 for membrane quality issues. 621,217 devices distributed with 73 complaints (0.012%). No reportable adverse events.",
+      "expected_behavior": "Should state benefit-risk profile has NOT been adversely impacted and remains UNCHANGED with specific supporting data",
+      "ground_truth_excerpt": "The benefit-risk profile of the device has NOT been adversely impacted and remains UNCHANGED. Throughout this period, approximately 621,217 devices were distributed globally, with a total of 73 complaints recorded."
+    },
+    {
+      "id": "q3",
+      "query": "Generate Section C (Volume of Sales and Population Exposure) with regional breakdown.",
+      "context": "Sales data: 2021: 78,866 units, 2022: 105,772 units, 2023: 165,165 units, 2024: 228,304 units, 2025 YTD: 43,110 units. Regions: EEA 39.3%, US 31%, Japan 8.3%, UK 1.8%.",
+      "expected_behavior": "Should include detailed regional table with actual numbers, calculate CAGR (~42%), note post-acquisition performance"
+    }
+  ],
+  "metadata": {
+    "created": "2026-02-03",
+    "purpose": "Evaluation test dataset for PSUR multi-agent system",
+    "total_queries": 3
+  }
+}
