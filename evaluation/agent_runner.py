@@ -9,30 +9,78 @@ from datetime import datetime
 BASE_URL = "http://localhost:8080"
 
 
-async def create_session(client, name="Evaluation Session"):
-    """Create a new PSUR session."""
-    async with client.post(
-        f"{BASE_URL}/api/sessions",
-        json={"name": name, "description": "Automated evaluation test"}
-    ) as resp:
+async def create_session(client, query_data):
+    """Create a new PSUR session with device info from query context."""
+    context = query_data.get("context", "")
+    
+    # Parse device name from context
+    device_name = "ZyMot Multi Sperm Separation Device"
+    if "ZyMot" in context or "ZyMōt" in context:
+        device_name = "ZyMot Multi Sperm Separation Device"
+    elif "LifeGlobal" in context:
+        device_name = "LifeGlobal Culture Media"
+    
+    params = {
+        "device_name": device_name,
+        "udi_di": "00850003864105",
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31"
+    }
+    
+    async with client.post(f"{BASE_URL}/api/sessions", params=params) as resp:
         if resp.status == 200:
             data = await resp.json()
-            return data.get("id")
+            return data.get("session_id")
         raise Exception(f"Failed to create session: {await resp.text()}")
 
 
-async def send_message(client, session_id, message, context=None):
-    """Send a message to the PSUR system and get response."""
-    payload = {"message": message}
-    if context:
-        payload["context"] = context
-    async with client.post(
-        f"{BASE_URL}/api/sessions/{session_id}/messages",
-        json=payload
-    ) as resp:
+async def start_generation(client, session_id):
+    """Start the PSUR generation process."""
+    async with client.post(f"{BASE_URL}/api/sessions/{session_id}/start") as resp:
         if resp.status == 200:
             return await resp.json()
-        raise Exception(f"Failed to send message: {await resp.text()}")
+        raise Exception(f"Failed to start generation: {await resp.text()}")
+
+
+async def get_messages(client, session_id):
+    """Get all messages from the session."""
+    async with client.get(f"{BASE_URL}/api/sessions/{session_id}/messages") as resp:
+        if resp.status == 200:
+            return await resp.json()
+        return []
+
+
+async def get_sections(client, session_id):
+    """Get all generated sections."""
+    async with client.get(f"{BASE_URL}/api/sessions/{session_id}/sections") as resp:
+        if resp.status == 200:
+            return await resp.json()
+        return []
+
+
+async def wait_for_completion(client, session_id, timeout=120):
+    """Wait for generation to complete or timeout."""
+    start_time = datetime.now()
+    last_message_count = 0
+    idle_count = 0
+    
+    while (datetime.now() - start_time).seconds < timeout:
+        messages = await get_messages(client, session_id)
+        
+        if len(messages) > last_message_count:
+            last_message_count = len(messages)
+            idle_count = 0
+            print(f"    Messages: {len(messages)}")
+        else:
+            idle_count += 1
+        
+        # If no new messages for 10 checks, consider done
+        if idle_count > 10:
+            break
+            
+        await asyncio.sleep(2)
+    
+    return await get_messages(client, session_id)
 
 
 async def run_evaluation_queries(queries_file, output_file, limit=None):
@@ -51,27 +99,37 @@ async def run_evaluation_queries(queries_file, output_file, limit=None):
             print(f"\n[{i}/{len(queries)}] Processing: {query_data['id']}")
             
             try:
-                session_id = await create_session(client, f"Eval - {query_data['id']}")
+                # Create session
+                session_id = await create_session(client, query_data)
                 print(f"  Created session: {session_id}")
                 
-                response = await send_message(
-                    client, 
-                    session_id, 
-                    query_data["query"], 
-                    query_data.get("context")
-                )
+                # Start PSUR generation
+                print("  Starting generation...")
+                await start_generation(client, session_id)
+                
+                # Wait for completion and collect messages
+                print("  Waiting for completion...")
+                messages = await wait_for_completion(client, session_id, timeout=120)
+                
+                # Get generated sections
+                sections = await get_sections(client, session_id)
                 
                 result = {
                     "query_id": query_data["id"],
                     "query": query_data["query"],
                     "context": query_data.get("context"),
                     "key_data_points": query_data.get("key_data_points", []),
-                    "response": response,
+                    "response": {
+                        "messages": messages,
+                        "sections": sections,
+                        "message_count": len(messages),
+                        "section_count": len(sections)
+                    },
                     "session_id": session_id,
                     "timestamp": datetime.now().isoformat()
                 }
                 results.append(result)
-                print(f"  Response received: {len(str(response))} chars")
+                print(f"  Completed: {len(messages)} messages, {len(sections)} sections")
                 
             except Exception as e:
                 print(f"  ERROR: {e}")
