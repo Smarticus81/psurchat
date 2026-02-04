@@ -127,138 +127,207 @@ class AgentConfig:
         return get_fallback_provider(self.ai_provider)
 
 
-# Agent configurations with preferred providers
+# SOTA Agent configurations - Aligned with MDCG 2022-21 and FormQAR-054
+# Each agent has specific expertise and section responsibility
 AGENT_CONFIGS = {
-    "orchestrator": AgentConfig(
+    # Orchestrator - Workflow coordination
+    "Alex": AgentConfig(
         name="Alex",
         role="Orchestrator",
         ai_provider="anthropic",
         model=settings.anthropic_model_orchestrator,
         temperature=0.5,
+        max_tokens=4000,
     ),
-    "device_id": AgentConfig(
-        name="Diana",
-        role="Device Identification",
-        ai_provider="openai",
-        model=settings.openai_model_default,
-    ),
-    "scope": AgentConfig(
-        name="Sam",
-        role="Scope & Documentation",
-        ai_provider="google",
-        model=settings.google_model_default,
-    ),
-    "sales": AgentConfig(
-        name="Raj",
-        role="Sales Analysis",
+
+    # Section A - Executive Summary (synthesizes all findings)
+    "Marcus": AgentConfig(
+        name="Marcus",
+        role="Executive Summary Specialist",
         ai_provider="anthropic",
-        model=settings.anthropic_model_fast,
+        model=settings.anthropic_model_synthesis,
+        temperature=0.6,
+        max_tokens=8000,
     ),
-    "vigilance": AgentConfig(
-        name="Vera",
-        role="Vigilance Monitor",
+
+    # Section B, C - Scope & Sales Data
+    "Greta": AgentConfig(
+        name="Greta",
+        role="Sales & Market Data Analyst",
         ai_provider="openai",
         model=settings.openai_model_default,
+        temperature=0.5,
+        max_tokens=4000,
     ),
-    "complaints": AgentConfig(
-        name="Carla",
+
+    # Section D - Serious Incidents & Vigilance
+    "David": AgentConfig(
+        name="David",
+        role="Vigilance Specialist",
+        ai_provider="anthropic",
+        model=settings.anthropic_model_orchestrator,
+        temperature=0.4,
+        max_tokens=4000,
+    ),
+
+    # Sections E, F - Customer Feedback & Complaints Management
+    "Emma": AgentConfig(
+        name="Emma",
         role="Complaint Classifier",
-        ai_provider="google",
-        model=settings.google_model_default,
+        ai_provider="openai",
+        model=settings.openai_model_default,
+        temperature=0.5,
+        max_tokens=6000,
     ),
-    "trending": AgentConfig(
-        name="Tara",
+
+    # Section G - Trends & Statistical Analysis
+    "Diana": AgentConfig(
+        name="Diana",
         role="Trend Detective",
         ai_provider="anthropic",
         model=settings.anthropic_model_synthesis,
+        temperature=0.4,
+        max_tokens=5000,
     ),
-    "fsca": AgentConfig(
-        name="Frank",
+
+    # Section H - Field Safety Corrective Actions
+    "Lisa": AgentConfig(
+        name="Lisa",
         role="FSCA Coordinator",
-        ai_provider="openai",
-        model=settings.openai_model_default,
-    ),
-    "capa": AgentConfig(
-        name="Cameron",
-        role="CAPA Verifier",
         ai_provider="google",
         model=settings.google_model_default,
+        temperature=0.5,
+        max_tokens=4000,
     ),
-    "risk": AgentConfig(
-        name="Rita",
-        role="Risk Specialist",
-        ai_provider="anthropic",
-        model=settings.anthropic_model_orchestrator,
-    ),
-    "benefit_risk": AgentConfig(
-        name="Brianna",
-        role="Benefit-Risk Evaluator",
+
+    # Section I - CAPA Implementation
+    "Tom": AgentConfig(
+        name="Tom",
+        role="CAPA Verifier",
         ai_provider="openai",
         model=settings.openai_model_default,
+        temperature=0.5,
+        max_tokens=4000,
     ),
-    "external_db": AgentConfig(
-        name="Eddie",
-        role="External DB Investigator",
+
+    # Sections J, K - Literature & External Databases
+    "James": AgentConfig(
+        name="James",
+        role="Literature Reviewer",
         ai_provider="perplexity",
         model="sonar",
+        temperature=0.6,
+        max_tokens=5000,
     ),
-    "pmcf": AgentConfig(
-        name="Clara",
+
+    # Section L - PMCF Activities
+    "Sarah": AgentConfig(
+        name="Sarah",
         role="PMCF Specialist",
         ai_provider="google",
         model=settings.google_model_default,
+        temperature=0.5,
+        max_tokens=4000,
     ),
-    "synthesis": AgentConfig(
-        name="Marcus",
-        role="Synthesis Expert",
+
+    # Section M - Benefit-Risk & Conclusions
+    "Robert": AgentConfig(
+        name="Robert",
+        role="Risk Specialist",
         ai_provider="anthropic",
-        model=settings.anthropic_model_synthesis,
-        max_tokens=8000,
+        model=settings.anthropic_model_orchestrator,
+        temperature=0.4,
+        max_tokens=6000,
     ),
-    "statistical": AgentConfig(
-        name="Statler",
-        role="Statistical Calculator",
-        ai_provider="openai",
-        model=settings.openai_model_default,
-    ),
-    "charts": AgentConfig(
-        name="Charley",
-        role="Chart Generator",
-        ai_provider="openai",
-        model=settings.openai_model_default,
-    ),
-    "data_quality": AgentConfig(
-        name="Quincy",
-        role="Data Quality Auditor",
-        ai_provider="openai",
-        model=settings.openai_model_default,
-    ),
-    "qc": AgentConfig(
+
+    # QC Validator - Reviews all sections
+    "Victoria": AgentConfig(
         name="Victoria",
-        role="QC Validator",
+        role="QC Expert",
         ai_provider="openai",
         model=settings.openai_model_default,
         temperature=0.3,
+        max_tokens=4000,
     ),
 }
 
 
-# Section mapping
+# SOTA Section mapping - Aligned with FormQAR-054 and MDCG 2022-21
+# Workflow order is based on dependency hierarchy
 SECTIONS = {
-    "A": {"title": "Device Identification", "agent": "Diana"},
-    "B": {"title": "Scope & Documentation", "agent": "Sam"},
-    "C": {"title": "Sales & Distribution", "agent": "Raj"},
-    "D": {"title": "Vigilance Data", "agent": "Vera"},
-    "E": {"title": "Complaint Analysis", "agent": "Carla"},
-    "F": {"title": "Trending Analysis", "agent": "Tara"},
-    "G": {"title": "FSCA Summary", "agent": "Frank"},
-    "H": {"title": "CAPA Actions", "agent": "Cameron"},
-    "I": {"title": "Risk Management", "agent": "Rita"},
-    "J": {"title": "Benefit-Risk Evaluation", "agent": "Brianna"},
-    "K": {"title": "External Database Search", "agent": "Eddie"},
-    "L": {"title": "PMCF Activities", "agent": "Clara"},
-    "M": {"title": "Final Synthesis", "agent": "Marcus"},
+    "A": {"title": "Executive Summary", "agent": "Marcus", "number": 1, "mdcg_ref": "1.1"},
+    "B": {"title": "Scope and Device Description", "agent": "Greta", "number": 2, "mdcg_ref": "1.2"},
+    "C": {"title": "Post-Market Data: Units Distributed", "agent": "Greta", "number": 3, "mdcg_ref": "2.1"},
+    "D": {"title": "Serious Incidents and Trends", "agent": "David", "number": 4, "mdcg_ref": "2.2"},
+    "E": {"title": "Post-Market Surveillance: Customer Feedback", "agent": "Emma", "number": 5, "mdcg_ref": "2.3"},
+    "F": {"title": "Complaints Management", "agent": "Emma", "number": 6, "mdcg_ref": "2.4"},
+    "G": {"title": "Trends and Performance Analysis", "agent": "Diana", "number": 7, "mdcg_ref": "3"},
+    "H": {"title": "Field Safety Corrective Actions (FSCA)", "agent": "Lisa", "number": 8, "mdcg_ref": "2.5"},
+    "I": {"title": "Corrective and Preventive Actions (CAPA)", "agent": "Tom", "number": 9, "mdcg_ref": "1.4"},
+    "J": {"title": "Literature Review and External Data", "agent": "James", "number": 10, "mdcg_ref": "1.3"},
+    "K": {"title": "External Adverse Event Databases", "agent": "James", "number": 11, "mdcg_ref": "2.6"},
+    "L": {"title": "Post-Market Clinical Follow-up (PMCF)", "agent": "Sarah", "number": 12, "mdcg_ref": "1.5"},
+    "M": {"title": "Overall Findings and Conclusions", "agent": "Robert", "number": 13, "mdcg_ref": "1.6"},
 }
+
+# Workflow generation order (dependency-based per SOTA spec)
+WORKFLOW_ORDER = [
+    "C",   # Phase 1: DATA FOUNDATION - Sales/Exposure (Greta)
+    "D",   # Phase 2: ADVERSE EVENT ANALYSIS - Serious Incidents (David)
+    "E",   # Phase 2: Customer Feedback (Emma)
+    "F",   # Phase 2: Complaints Management (Emma)
+    "G",   # Phase 3: ANALYTICAL - Trends & Analysis (Diana)
+    "H",   # Phase 3: FSCA (Lisa)
+    "I",   # Phase 3: CAPA (Tom)
+    "J",   # Phase 4: EXTERNAL CONTEXT - Literature Review (James)
+    "K",   # Phase 4: External Databases (James)
+    "L",   # Phase 5: CLINICAL EVIDENCE - PMCF (Sarah)
+    "B",   # Phase 6: CHARACTERIZATION - Scope & Description (Greta)
+    "M",   # Phase 7: SYNTHESIS - Findings & Conclusions (Robert)
+    "A",   # Phase 7: Executive Summary (Marcus)
+]
+
+
+def get_ai_client(provider: str):
+    """
+    Get AI client and model for a given provider.
+    Returns (client, model_name) tuple.
+    """
+    actual_provider, model = get_fallback_provider(provider)
+
+    if actual_provider == "anthropic":
+        import anthropic
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        return client, model
+
+    elif actual_provider == "openai":
+        from openai import OpenAI
+        client = OpenAI(api_key=settings.openai_api_key)
+        return client, model
+
+    elif actual_provider == "google":
+        import google.generativeai as genai
+        genai.configure(api_key=settings.google_api_key)
+        return genai, model
+
+    elif actual_provider == "xai":
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=settings.xai_api_key,
+            base_url="https://api.x.ai/v1"
+        )
+        return client, model
+
+    elif actual_provider == "perplexity":
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=settings.perplexity_api_key,
+            base_url="https://api.perplexity.ai"
+        )
+        return client, model
+
+    else:
+        raise ValueError(f"Unknown provider: {actual_provider}")
 
 
 def print_provider_status():
