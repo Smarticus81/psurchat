@@ -76,10 +76,10 @@ class PSURContext:
     # WHEN - Reporting Period & Timeline
     # =========================================================================
 
-    period_start: datetime = None
-    period_end: datetime = None
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
     psur_cadence: str = "Every 2 Years"
-    submission_deadline: datetime = None
+    submission_deadline: Optional[datetime] = None
     previous_psur_date: Optional[datetime] = None
     years_since_market_launch: int = 0
 
@@ -122,7 +122,7 @@ class PSURContext:
     clinical_follow_up_data_available: bool = False
 
     data_completeness: Dict[str, float] = field(default_factory=dict)
-    data_last_updated: datetime = None
+    data_last_updated: Optional[datetime] = None
     data_validation_status: str = "pending"
 
     # =========================================================================
@@ -202,6 +202,30 @@ class PSURContext:
     previous_psur_recommendations: List[str] = field(default_factory=list)
     actions_taken_on_previous_findings: List[str] = field(default_factory=list)
 
+    # Temporal continuity (PSUR sequence, CAPA status, trending)
+    psur_sequence_number: int = 1
+    psur_sequence_narrative: str = ""
+    previous_capa_status_summary: str = ""
+    trending_across_periods_narrative: str = ""
+
+    # Quality/completeness awareness (for agent prompts)
+    missing_fields: List[str] = field(default_factory=list)
+    data_quality_warnings: List[str] = field(default_factory=list)
+    data_confidence_by_domain: Dict[str, str] = field(default_factory=dict)
+    completeness_score: float = 0.0
+
+    # Master context (single golden source - all agents MUST use these only)
+    exposure_denominator_golden: int = 0
+    exposure_denominator_scope: str = "reporting_period_only"
+    annual_units_golden: Dict[int, int] = field(default_factory=dict)
+    closure_definition_text: str = ""
+    complaints_closed_canonical: int = 0
+    inference_policy: str = "strictly_factual"
+    data_availability_external_vigilance: bool = False
+    data_availability_complaint_closures_complete: bool = False
+    data_availability_rmf_hazard_list: bool = False
+    data_availability_intended_use: bool = False
+
     def calculate_metrics(self):
         """Calculate derived metrics from raw data"""
         if self.total_units_sold > 0:
@@ -270,12 +294,32 @@ class PSURContext:
             ])
             capa_summary = f"\n{capa_lines}"
 
+        golden_section = ""
+        if self.exposure_denominator_golden > 0 or self.closure_definition_text or self.inference_policy:
+            annual_line = ", ".join([f"{y}: {u:,}" for y, u in sorted(self.annual_units_golden.items())]) if self.annual_units_golden else "None"
+            golden_section = f"""
+================================================================================
+         SINGLE GOLDEN SOURCE - ALL SECTIONS MUST USE THESE ONLY
+================================================================================
+- **Exposure denominator:** {self.exposure_denominator_golden:,} units (scope: {self.exposure_denominator_scope}). Use this number for ALL rate calculations (complaint rate, incident rate). Do not use any other denominator.
+- **Annual distribution (canonical):** {annual_line}. Use these figures only for tables and trends; do not recalculate from raw data.
+- **Complaint closures (canonical):** {self.complaints_closed_canonical}. Definition: {self.closure_definition_text or 'Closed = investigation completed with root cause documented.'} Do not cite a different closure count.
+- **Inference policy:** {self.inference_policy}. If strictly_factual: do NOT infer or fill gaps; state "Not provided" or "Data not available" where absent. If allow_reasonable_inference: you may infer only where explicitly reasonable and state that it is inferred.
+- **Data availability (condition your narrative on these):**
+  - External vigilance database search performed: {"YES" if self.data_availability_external_vigilance else "NO - state explicitly that no external vigilance search was conducted"}
+  - Complaint closures complete: {"YES" if self.data_availability_complaint_closures_complete else "NO - do not claim complete closure statistics"}
+  - RMF hazard list available: {"YES" if self.data_availability_rmf_hazard_list else "NO - do not reproduce or assume hazard list"}
+  - Intended use statement provided: {"YES" if self.data_availability_intended_use else "NO - state that intended use is not provided; do not infer"}
+Do not use template language that assumes best practice (e.g. "systematic vigilance monitoring", "screening within two business days") unless the data availability flags above are YES for the relevant domain.
+================================================================================
+
+"""
         return f"""
 ================================================================================
          COMPREHENSIVE PSUR REGULATORY & OPERATIONAL CONTEXT
               (MDR 2017/745 Article 86 | MDCG 2022-21 Compliance)
 ================================================================================
-
+{golden_section}
 ## I. REGULATORY FRAMEWORK & AUTHORITY
 
 This PSUR must comply with the following hierarchy (in order of precedence):
@@ -324,6 +368,14 @@ This PSUR must comply with the following hierarchy (in order of precedence):
 **PSUR Reporting Period:** {period_str}
 **PSUR Cadence:** {self.psur_cadence} (Per MDR 2017/745)
 **Previous PSUR Submission:** {self.previous_psur_date.strftime('%d %B %Y') if self.previous_psur_date else 'N/A - Initial PSUR'}
+
+---
+
+## III.B TEMPORAL CONTINUITY
+
+**This report:** {self.psur_sequence_narrative or f'PSUR #{self.psur_sequence_number} for this device.'}
+**Previous CAPA status:** {self.previous_capa_status_summary or 'No previous CAPA summary in context.'}
+**Trending across periods:** {self.trending_across_periods_narrative or 'Single-period or initial PSUR; trending narrative to be derived from data where applicable.'}
 
 ---
 
@@ -383,11 +435,21 @@ This PSUR must comply with the following hierarchy (in order of precedence):
 
 ## X. DATA QUALITY & COMPLETENESS
 
-**Data Sources Available:**
+**Completeness score:** {self.completeness_score:.0f}% (overall data readiness for this PSUR)
+
+**Data sources available:**
   Sales Data: {'YES - Use exact figures' if self.sales_data_available else 'NO - State "No sales data available" explicitly'}
   Complaint Data: {'YES - Detail investigation outcomes' if self.complaint_data_available else 'NO - State "No complaint data analyzed" explicitly'}
   Vigilance Data: {'YES - Include database search results' if self.vigilance_data_available else 'NO - State "No vigilance database search conducted" explicitly'}
   Clinical Follow-up: {'YES - Include study status' if self.clinical_follow_up_data_available else 'NO'}
+
+**Confidence by domain:** {', '.join([f'{k}: {v}' for k, v in self.data_confidence_by_domain.items()]) if self.data_confidence_by_domain else 'Not assessed'}
+
+**Missing or incomplete fields (acknowledge where relevant):**
+  {chr(10).join(['  - ' + m for m in self.missing_fields[:20]]) if self.missing_fields else '  None identified'}
+
+**Data quality warnings:**
+  {chr(10).join(['  - ' + w for w in self.data_quality_warnings]) if self.data_quality_warnings else '  None'}
 
 ---
 
@@ -567,6 +629,114 @@ WORKFLOW_ORDER = [
     "A",   # Phase 7: Executive Summary (Marcus)
 ]
 
+# Section interdependency map: citations, data flow, link to benefit-risk conclusion (Section M)
+SECTION_INTERDEPENDENCIES = {
+    "C": {
+        "upstream": [],
+        "downstream": ["E", "G", "M"],
+        "cites": [],
+        "cited_by": ["E", "G", "A", "M"],
+        "data_flow": "Units distributed form the denominator for complaint rates (Section E) and trend analysis (Section G); cited in benefit-risk conclusion (M).",
+        "benefit_risk_link": "Exposure denominator for risk metrics; feeds into complaint rate and trend conclusions in M.",
+    },
+    "D": {
+        "upstream": [],
+        "downstream": ["G", "H", "M"],
+        "cites": [],
+        "cited_by": ["G", "H", "A", "M"],
+        "data_flow": "Serious incident counts and classifications feed trend analysis (G), FSCA (H), and final benefit-risk (M).",
+        "benefit_risk_link": "Direct input to safety assessment and benefit-risk determination in Section M.",
+    },
+    "E": {
+        "upstream": ["C"],
+        "downstream": ["F", "G", "M"],
+        "cites": ["C"],
+        "cited_by": ["F", "G", "A", "M"],
+        "data_flow": "Complaint summary uses Section C units for rate; feeds Complaints Management (F), Trends (G), and M.",
+        "benefit_risk_link": "Complaint rate and severity feed risk assessment in M.",
+    },
+    "F": {
+        "upstream": ["E"],
+        "downstream": ["I", "G", "M"],
+        "cites": ["E"],
+        "cited_by": ["I", "A", "M"],
+        "data_flow": "Investigation and CAPA closure reference Section E; feed CAPA section (I) and conclusions (M).",
+        "benefit_risk_link": "Closure rates and effectiveness support risk control in M.",
+    },
+    "G": {
+        "upstream": ["C", "D", "E"],
+        "downstream": ["M", "A"],
+        "cites": ["C", "D", "E"],
+        "cited_by": ["A", "M"],
+        "data_flow": "Trends and signals aggregate C/D/E; primary input to findings and Executive Summary.",
+        "benefit_risk_link": "Signal detection and trend conclusions directly drive Section M benefit-risk.",
+    },
+    "H": {
+        "upstream": ["D"],
+        "downstream": ["M", "A"],
+        "cites": ["D"],
+        "cited_by": ["A", "M"],
+        "data_flow": "FSCA status links to serious incidents (D); summarized in M and A.",
+        "benefit_risk_link": "Mitigation effectiveness feeds risk conclusion in M.",
+    },
+    "I": {
+        "upstream": ["F", "E"],
+        "downstream": ["M", "A"],
+        "cites": ["F", "E"],
+        "cited_by": ["A", "M"],
+        "data_flow": "CAPA details reference complaint/investigation (E, F); feed conclusions (M).",
+        "benefit_risk_link": "CAPA effectiveness supports residual risk assessment in M.",
+    },
+    "J": {
+        "upstream": [],
+        "downstream": ["K", "M", "A"],
+        "cites": [],
+        "cited_by": ["K", "A", "M"],
+        "data_flow": "Literature context supports external database section (K) and overall conclusions.",
+        "benefit_risk_link": "External evidence informs benefit-risk in M.",
+    },
+    "K": {
+        "upstream": ["J"],
+        "downstream": ["M", "A"],
+        "cites": ["J"],
+        "cited_by": ["A", "M"],
+        "data_flow": "External database findings complement J; feed M and A.",
+        "benefit_risk_link": "Vigilance database evidence supports safety conclusion in M.",
+    },
+    "L": {
+        "upstream": [],
+        "downstream": ["M", "A"],
+        "cites": [],
+        "cited_by": ["A", "M"],
+        "data_flow": "PMCF evidence feeds performance and safety assessment in M.",
+        "benefit_risk_link": "Clinical performance evidence supports benefit side of benefit-risk in M.",
+    },
+    "B": {
+        "upstream": ["C", "E", "G"],
+        "downstream": ["M", "A"],
+        "cites": ["C", "E", "G"],
+        "cited_by": ["A", "M"],
+        "data_flow": "Scope and device description written after data sections; references exposure and trends.",
+        "benefit_risk_link": "Device characterization frames benefit-risk context in M.",
+    },
+    "M": {
+        "upstream": ["C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "B"],
+        "downstream": ["A"],
+        "cites": ["C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "B"],
+        "cited_by": ["A"],
+        "data_flow": "Synthesis of all evidence sections; sole direct benefit-risk conclusion.",
+        "benefit_risk_link": "This section IS the benefit-risk conclusion; all other sections feed it.",
+    },
+    "A": {
+        "upstream": ["C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "B", "M"],
+        "downstream": [],
+        "cites": ["C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "B", "M"],
+        "cited_by": [],
+        "data_flow": "Executive Summary written last; summarizes all sections including M.",
+        "benefit_risk_link": "Summarizes the benefit-risk conclusion from Section M for readers.",
+    },
+}
+
 # Agent role definitions
 AGENT_ROLES = {
     "Alex": {
@@ -672,7 +842,127 @@ AGENT_ROLES = {
 
 
 # =============================================================================
-# SECTION 3: AGENT SYSTEM PROMPTS
+# SECTION 3: WORKFLOW ROLE, INTERDEPENDENCY, QUALITY, TEMPORAL HELPERS
+# =============================================================================
+
+def get_workflow_role_context(agent_name: str, section_id: str) -> str:
+    """Build context: who else exists, order, how this agent's output feeds the PSUR."""
+    my_idx = next((i for i, sid in enumerate(WORKFLOW_ORDER) if sid == section_id), None)
+    prev_sections = [WORKFLOW_ORDER[i] for i in range(my_idx)] if my_idx is not None else []
+    next_sections = [WORKFLOW_ORDER[i] for i in range((my_idx or 0) + 1, len(WORKFLOW_ORDER))] if my_idx is not None else []
+
+    prev_agents = []
+    for sid in prev_sections:
+        s = SECTION_DEFINITIONS.get(sid, {})
+        a = s.get("agent")
+        if a and a not in prev_agents:
+            prev_agents.append(a)
+    next_agents = []
+    for sid in next_sections:
+        s = SECTION_DEFINITIONS.get(sid, {})
+        a = s.get("agent")
+        if a and a not in next_agents:
+            next_agents.append(a)
+
+    all_agents = list(AGENT_ROLES.keys())
+    all_agents.remove("Alex")
+    all_agents.remove("Victoria")
+
+    prev_names = [SECTION_DEFINITIONS.get(sid, {}).get("name", sid) for sid in prev_sections[:5]]
+    next_names = [SECTION_DEFINITIONS.get(sid, {}).get("name", sid) for sid in next_sections[:5]]
+
+    return f"""
+## Your Place in the Workflow
+
+**Other agents in this PSUR:** {", ".join(all_agents)}. Alex coordinates; Victoria performs QC.
+
+**Sections already completed (your upstream):** {", ".join(prev_sections) if prev_sections else "None - you are among the first."}
+  {chr(10).join(['  - ' + n for n in prev_names]) if prev_names else "  (You are early in the pipeline.)"}
+
+**Sections that will follow (your downstream):** {", ".join(next_sections) if next_sections else "None - you are among the last."}
+  {chr(10).join(['  - ' + n for n in next_names]) if next_names else "  (Your section feeds later sections.)"}
+
+**How your output is used:** Your Section {section_id} content will be used by later sections for cross-references and by Section M (Overall Findings and Conclusions) for the benefit-risk determination. Executive Summary (A) will summarize all sections including yours. Write so downstream agents and the Notified Body can rely on clear, cited narrative.
+"""
+
+
+def get_section_interdependency_context(section_id: str) -> str:
+    """Build context: which sections cite each other, data flow, link to benefit-risk."""
+    dep = SECTION_INTERDEPENDENCIES.get(section_id, {})
+    if not dep:
+        return ""
+    upstream = dep.get("upstream", [])
+    downstream = dep.get("downstream", [])
+    cites = dep.get("cites", [])
+    cited_by = dep.get("cited_by", [])
+    data_flow = dep.get("data_flow", "")
+    benefit_risk_link = dep.get("benefit_risk_link", "")
+
+    lines = [
+        "## Section Interdependency and Benefit-Risk Link",
+        "",
+        "**Sections that feed into yours (cite these where relevant):** " + (", ".join([f"Section {s}" for s in cites]) if cites else "None."),
+        "**Sections that will cite yours:** " + (", ".join([f"Section {s}" for s in cited_by]) if cited_by else "None."),
+        "",
+        "**Data flow:** " + data_flow,
+        "",
+        "**Connection to benefit-risk conclusion (Section M):** " + benefit_risk_link,
+    ]
+    return "\n".join(lines)
+
+
+def get_quality_completeness_context(context: PSURContext) -> str:
+    """Build context: missing fields, confidence, data quality warnings."""
+    lines = [
+        "## Data Quality and Completeness Awareness",
+        "",
+        f"**Overall completeness score (0-100%):** {context.completeness_score:.0f}%",
+        "",
+    ]
+    if context.data_confidence_by_domain:
+        lines.append("**Confidence by domain:**")
+        for domain, level in context.data_confidence_by_domain.items():
+            lines.append(f"  - {domain}: {level}")
+        lines.append("")
+    if context.missing_fields:
+        lines.append("**Missing or incomplete fields (acknowledge in narrative where relevant):**")
+        for m in context.missing_fields[:15]:
+            lines.append(f"  - {m}")
+        lines.append("")
+    if context.data_quality_warnings:
+        lines.append("**Data quality warnings (address or state limitations):**")
+        for w in context.data_quality_warnings:
+            lines.append(f"  - {w}")
+    else:
+        lines.append("**Data quality warnings:** None identified.")
+    return "\n".join(lines)
+
+
+def get_temporal_continuity_context(context: PSURContext) -> str:
+    """Build context: PSUR number, previous CAPAs, trending across periods."""
+    lines = [
+        "## Temporal Continuity",
+        "",
+        f"**This report:** {context.psur_sequence_narrative or f'PSUR #{context.psur_sequence_number} for this device in this system.'}",
+        "",
+    ]
+    if context.previous_psur_date:
+        lines.append(f"**Previous PSUR submission date:** {context.previous_psur_date.strftime('%d %B %Y')}.")
+    else:
+        lines.append("**Previous PSUR:** Not applicable (e.g. initial PSUR or first in system).")
+    lines.append("")
+    if context.previous_capa_status_summary:
+        lines.append("**Previous CAPA status (closed/verified this period):**")
+        lines.append("  " + context.previous_capa_status_summary)
+        lines.append("")
+    if context.trending_across_periods_narrative:
+        lines.append("**Trending across PSUR periods:**")
+        lines.append("  " + context.trending_across_periods_narrative)
+    return "\n".join(lines)
+
+
+# =============================================================================
+# SECTION 4: AGENT SYSTEM PROMPTS
 # =============================================================================
 
 def get_agent_system_prompt(agent_name: str, section_id: str, context: PSURContext) -> str:
@@ -700,6 +990,14 @@ You are assigned **Section {section_id}: {section.get('name', 'PSUR Section')}**
 
 **Required Content:**
 {chr(10).join(['- ' + item for item in section.get('required_content', [])])}
+
+{get_workflow_role_context(agent_name, section_id)}
+
+{get_section_interdependency_context(section_id)}
+
+{get_quality_completeness_context(context)}
+
+{get_temporal_continuity_context(context)}
 
 ## Regulatory Authority Hierarchy
 
@@ -858,7 +1156,7 @@ Be thorough but fair. Minor stylistic issues should not cause a FAIL. Focus on r
 
 
 # =============================================================================
-# SECTION 4: SOTA ORCHESTRATOR CLASS
+# SECTION 5: SOTA ORCHESTRATOR CLASS
 # =============================================================================
 
 class SOTAOrchestrator:
@@ -869,7 +1167,7 @@ class SOTAOrchestrator:
 
     def __init__(self, session_id: int):
         self.session_id = session_id
-        self.context: PSURContext = None
+        self.context: Optional[PSURContext] = None
         self.current_phase = "initialization"
         self.sections_completed = []
         self.max_qc_iterations = 3
@@ -885,6 +1183,8 @@ class SOTAOrchestrator:
 
             await self._initialize_context()
             await self._initialize_agents()
+            if self.context is None:
+                raise RuntimeError("Context initialization failed")
 
             # Phase 1-7: Generate sections in dependency order
             await self._post_message("Alex", "all",
@@ -943,36 +1243,142 @@ class SOTAOrchestrator:
             if not session:
                 raise ValueError(f"Session {self.session_id} not found")
 
-            # Build context from session data
+            # Build context from session data (extract scalar values from ORM instance)
+            _device_name: str = getattr(session, "device_name", None) or "Unknown Device"
+            _udi_di: str = getattr(session, "udi_di", None) or "Pending"
+            _period_start: datetime = getattr(session, "period_start", None) or datetime.min
+            _period_end: datetime = getattr(session, "period_end", None) or datetime.min
             self.context = PSURContext(
-                device_name=session.device_name or "Unknown Device",
-                udi_di=session.udi_di or "Pending",
-                period_start=session.period_start,
-                period_end=session.period_end
+                device_name=_device_name,
+                udi_di=_udi_di,
+                period_start=_period_start,
+                period_end=_period_end
             )
 
             # Load and analyze data files
             data_files = db.query(DataFile).filter(DataFile.session_id == self.session_id).all()
 
             for df in data_files:
+                _uploaded_at = getattr(df, "uploaded_at", None)
                 self.context.data_files.append({
-                    "type": df.file_type,
-                    "filename": df.filename,
-                    "uploaded_at": df.uploaded_at.isoformat() if df.uploaded_at else None
+                    "type": getattr(df, "file_type", ""),
+                    "filename": getattr(df, "filename", ""),
+                    "uploaded_at": _uploaded_at.isoformat() if _uploaded_at is not None else None
                 })
 
-                if df.file_type == "sales":
+                _file_type = getattr(df, "file_type", "") or ""
+                if _file_type == "sales":
                     self.context.sales_data_available = True
                     await self._extract_sales_data(df)
-                elif df.file_type == "complaints":
+                elif _file_type == "complaints":
                     self.context.complaint_data_available = True
                     await self._extract_complaint_data(df)
-                elif df.file_type == "vigilance":
+                elif _file_type == "vigilance":
                     self.context.vigilance_data_available = True
                     await self._extract_vigilance_data(df)
 
             # Calculate derived metrics
             self.context.calculate_metrics()
+
+            # Apply master context (single golden source) if present
+            _master = getattr(session, "master_context", None)
+            if _master and isinstance(_master, dict):
+                self.context.exposure_denominator_golden = int(_master.get("exposure_denominator_value", 0) or 0)
+                self.context.exposure_denominator_scope = str(_master.get("exposure_denominator_scope", "reporting_period_only"))
+                self.context.annual_units_golden = {int(k): int(v) for k, v in (_master.get("annual_units_canonical") or {}).items()}
+                self.context.closure_definition_text = str(_master.get("closure_definition_text", "") or "")
+                self.context.complaints_closed_canonical = int(_master.get("complaints_closed_canonical", 0) or 0)
+                self.context.inference_policy = str(_master.get("inference_policy", "strictly_factual") or "strictly_factual")
+                dav = _master.get("data_availability") or {}
+                self.context.data_availability_external_vigilance = bool(dav.get("external_vigilance_searched", False))
+                self.context.data_availability_complaint_closures_complete = bool(dav.get("complaint_closures_complete", False))
+                self.context.data_availability_rmf_hazard_list = bool(dav.get("rmf_hazard_list_available", False))
+                self.context.data_availability_intended_use = bool(dav.get("intended_use_provided", False))
+                if self.context.exposure_denominator_golden > 0:
+                    self.context.total_units_sold = self.context.exposure_denominator_golden
+                if self.context.annual_units_golden:
+                    self.context.total_units_by_year = dict(self.context.annual_units_golden)
+                if self.context.complaints_closed_canonical >= 0:
+                    self.context.complaints_with_root_cause = self.context.complaints_closed_canonical
+                self.context.calculate_metrics()
+
+            # Temporal continuity
+            self.context.psur_sequence_number = self.session_id
+            self.context.psur_sequence_narrative = (
+                f"This is PSUR #{self.session_id} for this device in this system. "
+                "Treat as the current reporting period submission."
+            )
+            _capa_closed = self.context.capa_actions_closed_this_period
+            _capa_verified = self.context.capa_actions_effectiveness_verified
+            _capa_details = self.context.capa_details
+            if _capa_closed or _capa_verified or _capa_details:
+                parts = []
+                if _capa_closed:
+                    parts.append(f"{_capa_closed} CAPA(s) closed this period")
+                if _capa_verified:
+                    parts.append(f"{_capa_verified} CAPA(s) effectiveness verified")
+                if _capa_details:
+                    for c in _capa_details[:5]:
+                        parts.append(f"{c.get('id', 'N/A')}: {c.get('status', 'N/A')}")
+                self.context.previous_capa_status_summary = "; ".join(parts)
+            else:
+                self.context.previous_capa_status_summary = "No CAPA actions in context for this period."
+            if self.context.total_units_by_year or self.context.complaint_rate_by_year or len(self.context.total_units_by_year or {}) > 1:
+                self.context.trending_across_periods_narrative = (
+                    "Multi-year or multi-period data is available (units by year and/or complaint rates). "
+                    "Use it to describe trends where relevant; cite time ranges and figures."
+                )
+            else:
+                self.context.trending_across_periods_narrative = "Single-period or limited historical data; state scope of data where relevant."
+
+            # Quality/completeness awareness
+            self.context.data_confidence_by_domain = {}
+            if self.context.sales_data_available and self.context.total_units_sold > 0:
+                self.context.data_confidence_by_domain["sales"] = "high"
+            elif self.context.sales_data_available:
+                self.context.data_confidence_by_domain["sales"] = "medium"
+            else:
+                self.context.data_confidence_by_domain["sales"] = "none"
+            if self.context.complaint_data_available and self.context.total_complaints > 0:
+                self.context.data_confidence_by_domain["complaints"] = "high" if (self.context.complaints_with_root_cause or 0) > 0 else "medium"
+            elif self.context.complaint_data_available:
+                self.context.data_confidence_by_domain["complaints"] = "low"
+            else:
+                self.context.data_confidence_by_domain["complaints"] = "none"
+            self.context.data_confidence_by_domain["vigilance"] = "high" if self.context.vigilance_data_available else "none"
+            self.context.data_confidence_by_domain["clinical_follow_up"] = "high" if self.context.clinical_follow_up_data_available else "none"
+
+            missing = []
+            if not self.context.device_type:
+                missing.append("Device type / classification detail")
+            if not self.context.intended_use:
+                missing.append("Full intended use statement")
+            if not self.context.udi_di or self.context.udi_di == "Pending":
+                missing.append("Confirmed UDI-DI (may be pending extraction)")
+            if not self.context.sales_data_available:
+                missing.append("Sales/distribution data")
+            if not self.context.complaint_data_available:
+                missing.append("Complaint data")
+            if not self.context.vigilance_data_available:
+                missing.append("Vigilance database search results")
+            if not self.context.known_residual_risks:
+                missing.append("Explicit list of known residual risks from RMF")
+            self.context.missing_fields = missing
+
+            if not self.context.sales_data_available:
+                self.context.data_quality_warnings.append("No sales data provided; complaint rates cannot be calculated. State 'No sales data available' where relevant.")
+            if self.context.complaint_data_available and (self.context.complaints_unconfirmed or 0) > 0:
+                self.context.data_quality_warnings.append(f"{self.context.complaints_unconfirmed} complaint(s) with unconfirmed root cause; acknowledge in narrative.")
+            if not self.context.vigilance_data_available:
+                self.context.data_quality_warnings.append("No vigilance data; state that no external vigilance database search was conducted if applicable.")
+
+            n_available = sum([
+                self.context.sales_data_available,
+                self.context.complaint_data_available,
+                self.context.vigilance_data_available,
+                bool(self.context.device_type or self.context.intended_use),
+            ])
+            self.context.completeness_score = max(0.0, min(100.0, (n_available / 4.0) * 100.0 - (len(missing) * 5.0)))
 
             await self._post_message("Alex", "all",
                 f"Context initialized. Device: {self.context.device_name}, "
@@ -984,13 +1390,17 @@ class SOTAOrchestrator:
 
     async def _extract_sales_data(self, data_file: DataFile):
         """Extract sales metrics from uploaded file."""
+        if self.context is None:
+            return
         try:
             import pandas as pd
             import io
 
-            content = data_file.file_data.decode('utf-8') if isinstance(data_file.file_data, bytes) else data_file.file_data
+            _file_data = getattr(data_file, "file_data", b"")
+            content = _file_data.decode('utf-8', errors='replace') if isinstance(_file_data, bytes) else str(_file_data)
 
-            if data_file.filename.endswith('.csv'):
+            _filename = getattr(data_file, "filename", "") or ""
+            if _filename.endswith('.csv'):
                 df = pd.read_csv(io.StringIO(content))
             else:
                 return
@@ -1015,25 +1425,35 @@ class SOTAOrchestrator:
 
             if units_col and year_col:
                 yearly = df.groupby(year_col)[units_col].sum()
-                self.context.total_units_by_year = {int(k): int(v) for k, v in yearly.items()}
+                self.context.total_units_by_year = {}
+                for k, v in yearly.items():
+                    if v is not None:
+                        try:
+                            self.context.total_units_by_year[int(k) if isinstance(k, (int, float, str)) else int(str(k))] = int(v)
+                        except (ValueError, TypeError):
+                            pass
 
             if units_col and region_col:
                 regional = df.groupby(region_col)[units_col].sum()
-                self.context.total_units_by_region = {str(k): int(v) for k, v in regional.items()}
-                self.context.regions = list(regional.index)
+                self.context.total_units_by_region = {str(k): int(v) for k, v in regional.items() if v is not None}
+                self.context.regions = [str(x) for x in regional.index]
 
         except Exception as e:
             print(f"Error extracting sales data: {e}")
 
     async def _extract_complaint_data(self, data_file: DataFile):
         """Extract complaint metrics from uploaded file."""
+        if self.context is None:
+            return
         try:
             import pandas as pd
             import io
 
-            content = data_file.file_data.decode('utf-8') if isinstance(data_file.file_data, bytes) else data_file.file_data
+            _file_data = getattr(data_file, "file_data", b"")
+            content = _file_data.decode('utf-8', errors='replace') if isinstance(_file_data, bytes) else str(_file_data)
 
-            if data_file.filename.endswith('.csv'):
+            _filename = getattr(data_file, "filename", "") or ""
+            if _filename.endswith('.csv'):
                 df = pd.read_csv(io.StringIO(content))
             else:
                 return
@@ -1078,13 +1498,17 @@ class SOTAOrchestrator:
 
     async def _extract_vigilance_data(self, data_file: DataFile):
         """Extract vigilance/incident metrics from uploaded file."""
+        if self.context is None:
+            return
         try:
             import pandas as pd
             import io
 
-            content = data_file.file_data.decode('utf-8') if isinstance(data_file.file_data, bytes) else data_file.file_data
+            _file_data = getattr(data_file, "file_data", b"")
+            content = _file_data.decode('utf-8', errors='replace') if isinstance(_file_data, bytes) else str(_file_data)
 
-            if data_file.filename.endswith('.csv'):
+            _filename = getattr(data_file, "filename", "") or ""
+            if _filename.endswith('.csv'):
                 df = pd.read_csv(io.StringIO(content))
             else:
                 return
@@ -1147,9 +1571,12 @@ class SOTAOrchestrator:
             f"Analyzing available data and generating compliant content...",
             "normal")
 
+        ctx = self.context
+        if ctx is None:
+            return False
         try:
             # Generate initial content
-            system_prompt = get_agent_system_prompt(agent_name, section_id, self.context)
+            system_prompt = get_agent_system_prompt(agent_name, section_id, ctx)
 
             user_prompt = f"""
 Generate Section {section_id}: {section_name} for the PSUR.
@@ -1157,13 +1584,13 @@ Generate Section {section_id}: {section_name} for the PSUR.
 Use the comprehensive context provided in the system prompt. Write professional narrative prose suitable for Notified Body review.
 
 Key data points to incorporate:
-- Device: {self.context.device_name}
-- UDI-DI: {self.context.udi_di}
-- Reporting Period: {self.context.period_start.strftime('%d %B %Y') if self.context.period_start else 'TBD'} to {self.context.period_end.strftime('%d %B %Y') if self.context.period_end else 'TBD'}
-- Total Units Distributed: {self.context.total_units_sold:,}
-- Total Complaints: {self.context.total_complaints}
-- Complaint Rate: {self.context.complaint_rate_percent:.4f}%
-- Serious Incidents: {self.context.serious_incidents}
+- Device: {ctx.device_name}
+- UDI-DI: {ctx.udi_di}
+- Reporting Period: {ctx.period_start.strftime('%d %B %Y') if ctx.period_start else 'TBD'} to {ctx.period_end.strftime('%d %B %Y') if ctx.period_end else 'TBD'}
+- Total Units Distributed: {ctx.total_units_sold:,}
+- Total Complaints: {ctx.total_complaints}
+- Complaint Rate: {ctx.complaint_rate_percent:.4f}%
+- Serious Incidents: {ctx.serious_incidents}
 
 Generate the complete section content now. Remember: NO bullet points, narrative prose only.
 """
@@ -1237,7 +1664,8 @@ Generate the complete section content now. Remember: NO bullet points, narrative
 
     async def _qc_review(self, section_id: str, content: str) -> Dict[str, Any]:
         """Perform QC review on section content."""
-
+        if self.context is None:
+            return {"verdict": "PASS", "feedback": "Context unavailable, proceeding with content"}
         qc_prompt = get_qc_system_prompt(section_id, content, self.context)
 
         user_prompt = "Review the section content and provide your verdict (PASS/CONDITIONAL/FAIL) with detailed feedback."
@@ -1302,13 +1730,14 @@ Generate the complete revised section.
             ).first()
 
             if workflow:
-                workflow.status = "complete"
-                workflow.sections_completed = len(self.sections_completed)
-                workflow.summary = f"PSUR generation complete. {len(self.sections_completed)} sections generated."
+                setattr(workflow, "status", "complete")
+                setattr(workflow, "sections_completed", len(self.sections_completed))
+                setattr(workflow, "summary", f"PSUR generation complete. {len(self.sections_completed)} sections generated.")
                 db.commit()
 
+        ctx = self.context
         await self._post_message("Alex", "all",
-            f"PSUR generation complete for {self.context.device_name}. "
+            f"PSUR generation complete for {ctx.device_name if ctx else 'session'}. "
             f"{len(self.sections_completed)} sections successfully generated and approved. "
             f"Document is ready for download.",
             "success")
@@ -1319,7 +1748,7 @@ Generate the complete revised section.
         with get_db_context() as db:
             session = db.query(PSURSession).filter(PSURSession.id == self.session_id).first()
             if session:
-                session.status = "complete"
+                setattr(session, "status", "complete")
                 db.commit()
 
     async def _save_section(self, section_id: str, section_name: str, agent_name: str,
@@ -1333,9 +1762,9 @@ Generate the complete revised section.
             ).first()
 
             if existing:
-                existing.content = content
-                existing.status = status
-                existing.updated_at = datetime.utcnow()
+                setattr(existing, "content", content)
+                setattr(existing, "status", status)
+                setattr(existing, "updated_at", datetime.utcnow())
             else:
                 section = SectionDocument(
                     session_id=self.session_id,
@@ -1359,9 +1788,9 @@ Generate the complete revised section.
             ).first()
 
             if workflow:
-                workflow.current_section = current_section
-                workflow.sections_completed = len(self.sections_completed)
-                workflow.status = "running"
+                setattr(workflow, "current_section", current_section)
+                setattr(workflow, "sections_completed", len(self.sections_completed))
+                setattr(workflow, "status", "running")
                 db.commit()
 
     async def _set_agent_status(self, agent_name: str, status: str):
@@ -1374,8 +1803,8 @@ Generate the complete revised section.
             ).first()
 
             if agent:
-                agent.status = status
-                agent.last_activity = datetime.utcnow()
+                setattr(agent, "status", status)
+                setattr(agent, "last_activity", datetime.utcnow())
                 db.commit()
 
     async def _post_message(self, from_agent: str, to_agent: str, message: str,
@@ -1394,9 +1823,8 @@ Generate the complete revised section.
             db.add(msg)
             db.commit()
 
-    async def _call_ai(self, agent_name: str, system_prompt: str, user_prompt: str) -> Optional[str]:
-        """Call AI provider with fallback support."""
-
+    def _call_ai_sync(self, agent_name: str, system_prompt: str, user_prompt: str) -> Optional[str]:
+        """Synchronous AI call (run in thread pool to avoid blocking event loop)."""
         config = AGENT_CONFIGS.get(agent_name, AGENT_CONFIGS.get("Alex"))
         if not config:
             return None
@@ -1405,26 +1833,52 @@ Generate the complete revised section.
             client, model = get_ai_client(config.ai_provider)
 
             if config.ai_provider == "anthropic":
-                response = client.messages.create(
+                messages_api = getattr(client, "messages", None)
+                if messages_api is None:
+                    return None
+                response = messages_api.create(
                     model=model,
                     max_tokens=config.max_tokens,
                     temperature=config.temperature,
                     system=system_prompt,
                     messages=[{"role": "user", "content": user_prompt}]
                 )
-                return response.content[0].text
+                content_list = getattr(response, "content", None) or []
+                first_block = content_list[0] if content_list else None
+                return getattr(first_block, "text", str(first_block) if first_block else "")
 
             elif config.ai_provider == "openai":
-                response = client.chat.completions.create(
-                    model=model,
-                    max_tokens=config.max_tokens,
-                    temperature=config.temperature,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ]
-                )
-                return response.choices[0].message.content
+                chat_api = getattr(client, "chat", None)
+                if chat_api is None:
+                    return None
+                try:
+                    response = chat_api.completions.create(
+                        model=model,
+                        max_completion_tokens=config.max_tokens,
+                        temperature=config.temperature,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ]
+                    )
+                except Exception as openai_err:
+                    err_str = str(openai_err).lower()
+                    if "max_completion_tokens" in err_str and ("not supported" in err_str or "unsupported" in err_str):
+                        response = chat_api.completions.create(
+                            model=model,
+                            max_tokens=config.max_tokens,
+                            temperature=config.temperature,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt}
+                            ]
+                        )
+                    else:
+                        raise
+                choices = getattr(response, "choices", None) or []
+                first_choice = choices[0] if choices else None
+                msg = getattr(first_choice, "message", None) if first_choice else None
+                return getattr(msg, "content", None) if msg else None
 
             elif config.ai_provider == "google":
                 import google.generativeai as genai
@@ -1436,53 +1890,110 @@ Generate the complete revised section.
                         temperature=config.temperature
                     )
                 )
-                return response.text
+                return getattr(response, "text", str(response))
 
             elif config.ai_provider == "xai":
-                response = client.chat.completions.create(
-                    model=model,
-                    max_tokens=config.max_tokens,
-                    temperature=config.temperature,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ]
-                )
-                return response.choices[0].message.content
+                chat_api = getattr(client, "chat", None)
+                if chat_api is None:
+                    return None
+                try:
+                    response = chat_api.completions.create(
+                        model=model,
+                        max_completion_tokens=config.max_tokens,
+                        temperature=config.temperature,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ]
+                    )
+                except Exception as xai_err:
+                    err_str = str(xai_err).lower()
+                    if "max_completion_tokens" in err_str and ("not supported" in err_str or "unsupported" in err_str):
+                        response = chat_api.completions.create(
+                            model=model,
+                            max_tokens=config.max_tokens,
+                            temperature=config.temperature,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt}
+                            ]
+                        )
+                    else:
+                        raise
+                choices = getattr(response, "choices", None) or []
+                first_choice = choices[0] if choices else None
+                msg = getattr(first_choice, "message", None) if first_choice else None
+                return getattr(msg, "content", None) if msg else None
 
         except Exception as e:
             print(f"AI call failed for {agent_name}: {e}")
 
-            # Try fallback providers
             fallback_providers = ["anthropic", "openai", "google", "xai"]
-            fallback_providers.remove(config.ai_provider) if config.ai_provider in fallback_providers else None
+            if config.ai_provider in fallback_providers:
+                fallback_providers.remove(config.ai_provider)
 
             for provider in fallback_providers:
                 try:
                     client, model = get_ai_client(provider)
 
                     if provider == "anthropic":
-                        response = client.messages.create(
+                        messages_api = getattr(client, "messages", None)
+                        if messages_api is None:
+                            continue
+                        response = messages_api.create(
                             model=model,
                             max_tokens=4096,
                             system=system_prompt,
                             messages=[{"role": "user", "content": user_prompt}]
                         )
-                        return response.content[0].text
+                        content_list = getattr(response, "content", None) or []
+                        first_block = content_list[0] if content_list else None
+                        return getattr(first_block, "text", str(first_block) if first_block else "")
 
                     elif provider in ["openai", "xai"]:
-                        response = client.chat.completions.create(
-                            model=model,
-                            max_tokens=4096,
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt}
-                            ]
-                        )
-                        return response.choices[0].message.content
+                        chat_api = getattr(client, "chat", None)
+                        if chat_api is None:
+                            continue
+                        try:
+                            response = chat_api.completions.create(
+                                model=model,
+                                max_completion_tokens=4096,
+                                messages=[
+                                    {"role": "system", "content": system_prompt},
+                                    {"role": "user", "content": user_prompt}
+                                ]
+                            )
+                        except Exception as fallback_param_err:
+                            err_str = str(fallback_param_err).lower()
+                            if "max_completion_tokens" in err_str:
+                                response = chat_api.completions.create(
+                                    model=model,
+                                    max_tokens=4096,
+                                    messages=[
+                                        {"role": "system", "content": system_prompt},
+                                        {"role": "user", "content": user_prompt}
+                                    ]
+                                )
+                            else:
+                                raise
+                        choices = getattr(response, "choices", None) or []
+                        first_choice = choices[0] if choices else None
+                        msg = getattr(first_choice, "message", None) if first_choice else None
+                        return getattr(msg, "content", None) if msg else None
 
                 except Exception as fallback_error:
                     print(f"Fallback to {provider} failed: {fallback_error}")
                     continue
 
             return None
+
+    async def _call_ai(self, agent_name: str, system_prompt: str, user_prompt: str) -> Optional[str]:
+        """Call AI provider in thread pool so the event loop is not blocked."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self._call_ai_sync,
+            agent_name,
+            system_prompt,
+            user_prompt,
+        )

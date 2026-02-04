@@ -139,9 +139,9 @@ function App() {
                     </div>
                 </aside>
 
-                {/* Center: Discussion Forum */}
-                <div className="main-content" style={{ borderRight: '1px solid #334155', height: '100%', overflow: 'hidden', position: 'relative' }}>
-                    <DiscussionForum sessionId={sessionId!} />
+                {/* Center: Discussion Forum (chat) */}
+                <div className="main-content" style={{ borderRight: '1px solid #334155', overflow: 'hidden' }}>
+                    {sessionId != null ? <DiscussionForum sessionId={sessionId} /> : null}
                 </div>
 
                 {/* Right Sidebar: Agent Network Graph */}

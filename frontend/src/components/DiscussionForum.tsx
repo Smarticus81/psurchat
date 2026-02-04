@@ -1,8 +1,11 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Bot } from 'lucide-react';
+import { Bot, ChevronDown, ChevronUp } from 'lucide-react';
 import { api, ChatMessage } from '../api';
 import './DiscussionForum.css';
+
+const COLLAPSED_MAX_LENGTH = 280;
+const COLLAPSED_LINES = 4;
 
 interface DiscussionForumProps {
     sessionId: number;
@@ -12,125 +15,160 @@ export const DiscussionForum: React.FC<DiscussionForumProps> = ({ sessionId }) =
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [inputText, setInputText] = useState('');
     const [isAutoScroll, setIsAutoScroll] = useState(true);
+    const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
     const scrollRef = useRef<HTMLDivElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    const fetchMessages = async () => {
+    const fetchMessages = useCallback(async () => {
         try {
             const data = await api.getMessages(sessionId);
-            // The API returns messages sorted DESC (newest first). 
-            // We want to display them chronologically (oldest at top), so we reverse.
-            setMessages(data.reverse());
+            const list = Array.isArray(data) ? data : [];
+            setMessages(list.slice().reverse());
         } catch (error) {
             console.error('Failed to fetch messages:', error);
         }
-    };
+    }, [sessionId]);
 
     const handleSendMessage = async () => {
         if (!inputText.trim()) return;
         try {
             await api.sendMessage(sessionId, inputText);
             setInputText('');
-            setIsAutoScroll(true); // Snap to bottom on send
+            setIsAutoScroll(true);
             fetchMessages();
         } catch (error) {
-            console.error("Failed to send:", error);
+            console.error('Failed to send:', error);
         }
     };
 
-    // Initial load and polling
+    const toggleExpanded = (id: number) => {
+        setExpandedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
     useEffect(() => {
-        setMessages([]); // Clear previous session messages immediately
+        setMessages([]);
+        setExpandedIds(new Set());
         const interval = setInterval(fetchMessages, 2000);
         fetchMessages();
         return () => clearInterval(interval);
-    }, [sessionId]);
+    }, [sessionId, fetchMessages]);
 
-    // Auto-scroll logic
     useEffect(() => {
         if (isAutoScroll && messagesEndRef.current) {
             messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
         }
     }, [messages, isAutoScroll]);
 
-    // Detect manual scrolling to disable auto-scroll
     const handleScroll = () => {
         if (!scrollRef.current) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-        const isBottom = scrollHeight - scrollTop === clientHeight;
+        const isBottom = scrollHeight - scrollTop - clientHeight < 60;
         setIsAutoScroll(isBottom);
     };
 
-    // Filter messages for selected agent AND exclude system data dumps
-    const filteredMessages = useMemo(() => {
-        let msgs = messages.filter(m => m.message_type !== 'system');
-
-        // The original fetchMessages already reverses for chronological display.
-        // If the new display logic expects newest at bottom, and the API returns newest first,
-        // then the initial reverse in fetchMessages might be counter-productive if we then reverse again here.
-        // Let's assume the goal is to have oldest at top, newest at bottom, which means the initial reverse is correct.
-        // The provided snippet has `msgs = [...msgs].reverse();` which would make it newest at top again.
-        // I will remove the second reverse here to maintain chronological order (oldest at top, newest at bottom).
-        // If the intent was to display newest at top, the initial reverse in fetchMessages should be removed.
-        // For now, I'll keep the initial reverse and remove the second reverse here to keep chronological order.
-        // If the user truly wants newest at bottom, the initial reverse in fetchMessages is correct.
-        // The comment "Reverse them for display (Newest at bottom)" in the provided snippet is confusing
-        // because reversing an already chronologically ordered list would put newest at top.
-        // Given the original code's intent to display chronologically (oldest at top), I'll ensure that.
-        // The `fetchMessages` already reverses the API data to be oldest first.
-        // So, `msgs` here is already oldest first.
-        // If the goal is "Newest at bottom", then `msgs` is already in the correct order for rendering.
-        // The line `msgs = [...msgs].reverse();` would put newest at top.
-        // I will remove that line to keep the chronological order (oldest at top, newest at bottom).
-        return msgs;
-    }, [messages]);
+    const filteredMessages = useMemo(
+        () => messages.filter((m) => m.message_type !== 'system'),
+        [messages]
+    );
 
     return (
         <div className="discussion-container">
             <div className="discussion-header">
-                <h3><Bot size={18} style={{ marginRight: '8px' }} />Live Agent Protocol</h3>
+                <h3><Bot size={18} className="header-icon" /> Live Agent Protocol</h3>
                 <div className="live-indicator">
-                    <span className="pulse-dot"></span>
-                    Live Channel
+                    <span className="pulse-dot" />
+                    Live
                 </div>
             </div>
 
             <div className="messages-list" ref={scrollRef} onScroll={handleScroll}>
                 {filteredMessages.length === 0 ? (
                     <div className="empty-state">
-                        <p>Initializing secure channel...</p>
-                        <p style={{ fontSize: '0.8rem', opacity: 0.6 }}>Waiting for agent handshake.</p>
+                        <p>Initializing channel...</p>
+                        <p className="empty-sub">Agents will appear here when the workflow starts.</p>
                     </div>
                 ) : (
-                    filteredMessages.map((msg) => (
-                        <div key={msg.id} className={`message-bubble ${msg.from_agent === 'System' ? 'system-msg' : ''} ${msg.from_agent === 'Alex' ? 'orchestrator-msg' : ''}`}>
-                            <div className="message-header">
-                                <span className="agent-name">{msg.from_agent}</span>
-                                <span className="timestamp">{msg.to_agent !== 'all' && <span className="recipient">➜ {msg.to_agent}</span>}</span>
+                    filteredMessages.map((msg) => {
+                        const isUser = msg.from_agent === 'User';
+                        const plainLength = (msg.message || '').replace(/\s+/g, ' ').length;
+                        const lineCount = (msg.message || '').split(/\n/).length;
+                        const isLong = plainLength > COLLAPSED_MAX_LENGTH || lineCount > COLLAPSED_LINES;
+                        const expanded = expandedIds.has(msg.id);
+                        const showExpand = isLong && !expanded;
+                        const showCollapse = isLong && expanded;
+
+                        return (
+                            <div
+                                key={msg.id}
+                                className={`message-row ${isUser ? 'message-row--user' : 'message-row--agent'}`}
+                            >
+                                <div
+                                    className={`chat-bubble ${isUser ? 'chat-bubble--user' : 'chat-bubble--agent'}`}
+                                    data-type={msg.message_type}
+                                >
+                                    {!isUser && (
+                                        <div className="chat-bubble__label">
+                                            {msg.from_agent}
+                                            {msg.to_agent !== 'all' && (
+                                                <span className="chat-bubble__to"> to {msg.to_agent}</span>
+                                            )}
+                                        </div>
+                                    )}
+                                    <div
+                                        className={`chat-bubble__content ${showExpand ? 'chat-bubble__content--collapsed' : ''}`}
+                                    >
+                                        <ReactMarkdown>{msg.message}</ReactMarkdown>
+                                    </div>
+                                    {showExpand && (
+                                        <button
+                                            type="button"
+                                            className="chat-bubble__expand"
+                                            onClick={() => toggleExpanded(msg.id)}
+                                        >
+                                            <ChevronDown size={14} /> Show more
+                                        </button>
+                                    )}
+                                    {showCollapse && (
+                                        <button
+                                            type="button"
+                                            className="chat-bubble__expand"
+                                            onClick={() => toggleExpanded(msg.id)}
+                                        >
+                                            <ChevronUp size={14} /> Show less
+                                        </button>
+                                    )}
+                                    <div className="chat-bubble__time">
+                                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </div>
+                                </div>
                             </div>
-                            <div className="message-content">
-                                <ReactMarkdown>{msg.message}</ReactMarkdown>
-                            </div>
-                            <div className="message-footer">
-                                {new Date(msg.timestamp).toLocaleTimeString()}
-                            </div>
-                        </div>
-                    ))
+                        );
+                    })
                 )}
-                <div ref={messagesEndRef} />
+                <div ref={messagesEndRef} className="messages-anchor" />
             </div>
 
-            <div className="input-area chat-input-area">
+            <div className="chat-input-area">
                 <input
                     type="text"
                     className="chat-input"
-                    placeholder="Type a message to intervene in the agent workflow..."
+                    placeholder="Type a message..."
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-                    aria-label="Intervention message"
+                    aria-label="Message"
                 />
-                <button type="button" className="btn-send" onClick={handleSendMessage} disabled={!inputText.trim()}>
+                <button
+                    type="button"
+                    className="btn-send"
+                    onClick={handleSendMessage}
+                    disabled={!inputText.trim()}
+                >
                     Send
                 </button>
             </div>

@@ -92,7 +92,20 @@ export const api = {
         return response.data;
     },
 
-    // Generation Control
+    async setMasterContextIntake(sessionId: number, intake: {
+        denominator_scope?: string;
+        inference_policy?: string;
+        closure_definition?: string;
+        baseline_year?: number | null;
+        external_vigilance_searched?: boolean;
+        complaint_closures_complete?: boolean;
+        rmf_hazard_list_available?: boolean;
+        intended_use_provided?: boolean;
+    }) {
+        const response = await axios.patch(`${API_BASE_URL}/sessions/${sessionId}/intake`, intake);
+        return response.data;
+    },
+
     async startGeneration(sessionId: number) {
         const response = await axios.post(`${API_BASE_URL}/sessions/${sessionId}/start`);
         return response.data;

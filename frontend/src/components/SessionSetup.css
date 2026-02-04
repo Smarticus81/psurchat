@@ -101,6 +101,61 @@
     color: var(--neo-text-dim);
 }
 
+/* Master context intake */
+.master-context-section {
+    margin-top: 0.5rem;
+}
+.master-context-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: var(--neo-bg-deep);
+    border: 1px solid var(--neo-border-subtle);
+    border-radius: var(--neo-radius-md);
+    color: var(--neo-text-secondary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: var(--neo-transition);
+}
+.master-context-toggle:hover {
+    border-color: var(--neo-cyan);
+    color: var(--neo-text-primary);
+}
+.master-context-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--neo-bg-deep);
+    border: 1px solid var(--neo-border-subtle);
+    border-radius: var(--neo-radius-md);
+    border-top: none;
+}
+.checkbox-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--neo-text-muted);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    display: block;
+    margin-bottom: 0.5rem;
+}
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--neo-text-secondary);
+    cursor: pointer;
+    margin-bottom: 0.35rem;
+}
+.checkbox-row input {
+    accent-color: var(--neo-cyan);
+}
+
 /* File Upload Section */
 .file-upload-section {
     grid-column: span 2;

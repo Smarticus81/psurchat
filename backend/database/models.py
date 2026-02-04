@@ -23,6 +23,8 @@ class PSURSession(Base):
     
     status = Column(String(50), default="initializing")
     created_at = Column(DateTime, default=datetime.utcnow)
+    master_context = Column(JSON, nullable=True)
+    master_context_intake = Column(JSON, nullable=True)
     
     # Relationships
     agents = relationship("Agent", back_populates="session", cascade="all, delete-orphan")

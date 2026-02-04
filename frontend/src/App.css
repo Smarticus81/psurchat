@@ -135,9 +135,10 @@ body {
 .app-main {
     flex: 1;
     display: grid;
-    grid-template-columns: 280px 1fr 380px;
+    grid-template-columns: 280px minmax(320px, 1fr) 380px;
     overflow: hidden;
     background: var(--neo-bg-deep);
+    min-height: 0;
 }
 
 /* Sidebar Navigation */
@@ -149,6 +150,7 @@ body {
     flex-direction: column;
     gap: 1.5rem;
     overflow-y: auto;
+    min-width: 0;
 }
 
 .nav-item {
@@ -198,12 +200,14 @@ body {
     100% { transform: translateX(100%); }
 }
 
-/* Main Content */
+/* Main Content - Chat column; must not collapse */
 .main-content {
     background: var(--neo-bg-deep);
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
+    min-width: 0;
     position: relative;
     border-left: 1px solid var(--neo-border-subtle);
     border-right: 1px solid var(--neo-border-subtle);
@@ -214,6 +218,7 @@ body {
     background: var(--neo-bg-deep);
     overflow: hidden;
     position: relative;
+    min-width: 0;
 }
 
 /* Footer */

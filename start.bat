@@ -26,7 +26,7 @@ python reset_db.py
 echo.
 
 REM Start backend in new window
-start "PSUR Backend" cmd /k "cd /d %CD% && uvicorn backend.main:app --reload --port 8000"
+start "PSUR Backend" cmd /k "cd /d %CD% && uvicorn backend.main:app --reload --port 8000 --reload-dir backend"
 
 REM Wait 3 seconds for backend to start
 timeout /t 3 /nobreak > nul

@@ -7,7 +7,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 import asyncio
 import json
@@ -21,6 +21,7 @@ from backend.database.models import (
 )
 from backend.sota_orchestrator import SOTAOrchestrator, AGENT_ROLES, SECTION_DEFINITIONS, WORKFLOW_ORDER
 from backend.config import AGENT_CONFIGS, settings
+from backend.data_processor import MasterContextExtractor
 
 # Initialize FastAPI
 app = FastAPI(
@@ -317,25 +318,75 @@ async def get_session_files(session_id: int, db: Session = Depends(get_db)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+class MasterContextIntakeBody(BaseModel):
+    denominator_scope: str = "reporting_period_only"
+    inference_policy: str = "strictly_factual"
+    closure_definition: str = ""
+    baseline_year: Optional[int] = None
+    external_vigilance_searched: bool = False
+    complaint_closures_complete: bool = False
+    rmf_hazard_list_available: bool = False
+    intended_use_provided: bool = False
+
+
+@app.patch("/api/sessions/{session_id}/intake")
+async def set_master_context_intake(
+    session_id: int,
+    body: MasterContextIntakeBody,
+    db: Session = Depends(get_db),
+):
+    """Set master context intake options before starting PSUR generation."""
+    try:
+        session = db.query(PSURSession).filter(PSURSession.id == session_id).first()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        intake = {
+            "denominator_scope": body.denominator_scope,
+            "inference_policy": body.inference_policy,
+            "closure_definition": body.closure_definition or None,
+            "baseline_year": body.baseline_year,
+            "external_vigilance_searched": body.external_vigilance_searched,
+            "complaint_closures_complete": body.complaint_closures_complete,
+            "rmf_hazard_list_available": body.rmf_hazard_list_available,
+            "intended_use_provided": body.intended_use_provided,
+        }
+        setattr(session, "master_context_intake", intake)
+        db.commit()
+        return {"status": "ok", "session_id": session_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/sessions/{session_id}/start")
 async def start_generation(session_id: int, db: Session = Depends(get_db)):
-    """Start PSUR generation process"""
+    """Start PSUR generation: run master context extraction then orchestrator."""
     try:
         session = db.query(PSURSession).filter(PSURSession.id == session_id).first()
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        # Update session status
-        session.status = "running"
+        data_files = db.query(DataFile).filter(DataFile.session_id == session_id).all()
+        period_start = getattr(session, "period_start", None)
+        period_end = getattr(session, "period_end", None)
+        intake = getattr(session, "master_context_intake", None) or {}
+
+        master_context = MasterContextExtractor.extract(
+            data_files, period_start, period_end, intake
+        )
+        setattr(session, "master_context", master_context)
+        setattr(session, "status", "running")
         db.commit()
 
-        # Start orchestrator in background
         asyncio.create_task(run_orchestrator(session_id))
 
         return {
             "status": "started",
             "session_id": session_id,
-            "message": "PSUR generation initiated"
+            "message": "PSUR generation initiated; master context extracted.",
         }
     except HTTPException:
         raise
