@@ -16,10 +16,10 @@ from datetime import datetime
 
 from backend.database.session import get_db_context, get_db, init_db
 from backend.database.models import (
-    PSURSession, Agent, ChatMessage, SectionDocument, 
+    PSURSession, Agent, ChatMessage, SectionDocument,
     WorkflowState, DataFile
 )
-from backend.orchestrator import OrchestratorAgent
+from backend.sota_orchestrator import SOTAOrchestrator, AGENT_ROLES, SECTION_DEFINITIONS, WORKFLOW_ORDER
 from backend.config import AGENT_CONFIGS, settings
 
 # Initialize FastAPI
@@ -375,23 +375,28 @@ async def get_messages(
 
 @app.get("/api/sessions/{session_id}/agents")
 async def get_agents(session_id: int, db: Session = Depends(get_db)):
-    """Get all agents with their status and model info"""
+    """Get all agents with their status and model info (SOTA agent definitions)"""
     try:
         # Get status from DB
         db_agents = db.query(Agent).filter(Agent.session_id == session_id).all()
         status_map = {a.agent_id: a.status for a in db_agents}
-        
+
         agents_list = []
-        for agent_id, config in AGENT_CONFIGS.items():
+        for agent_id, agent_info in AGENT_ROLES.items():
+            config = AGENT_CONFIGS.get(agent_id)
             agents_list.append({
                 "id": agent_id,
-                "name": config.name,
-                "role": config.role,
-                "ai_provider": config.ai_provider,
-                "model": config.model,
+                "name": agent_info["name"],
+                "role": agent_info["role"],
+                "title": agent_info.get("title", agent_info["role"]),
+                "expertise": agent_info.get("expertise", ""),
+                "primary_section": agent_info.get("primary_section"),
+                "color": agent_info.get("color", "#6366f1"),
+                "ai_provider": config.ai_provider if config else "anthropic",
+                "model": config.model if config else "claude-sonnet-4-20250514",
                 "status": status_map.get(agent_id, "idle")
             })
-            
+
         return agents_list
     except Exception as e:
         traceback.print_exc()
@@ -676,22 +681,22 @@ async def websocket_endpoint(websocket: WebSocket, session_id: int):
 # ============================================================================
 
 async def run_orchestrator(session_id: int):
-    """Run orchestrator agent in background"""
+    """Run SOTA orchestrator agent in background"""
     try:
-        print(f"\nStarting orchestrator for session {session_id}...")
-        orchestrator = OrchestratorAgent(session_id)
-        
+        print(f"\nStarting SOTA orchestrator for session {session_id}...")
+        orchestrator = SOTAOrchestrator(session_id)
+
         # Broadcast start
         await manager.broadcast({
             "type": "orchestrator_started",
             "session_id": session_id,
             "timestamp": datetime.utcnow().isoformat()
         })
-        
-        print(f"Executing workflow for session {session_id}...")
+
+        print(f"Executing SOTA workflow for session {session_id}...")
         # Execute workflow
         result = await orchestrator.execute_workflow()
-        
+
         print(f"Workflow complete for session {session_id}: {result}")
         # Broadcast completion
         await manager.broadcast({
@@ -700,7 +705,7 @@ async def run_orchestrator(session_id: int):
             "result": result,
             "timestamp": datetime.utcnow().isoformat()
         })
-        
+
     except Exception as e:
         print(f"Orchestrator error for session {session_id}: {e}")
         traceback.print_exc()

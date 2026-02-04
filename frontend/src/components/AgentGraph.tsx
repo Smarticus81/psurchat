@@ -7,39 +7,37 @@ interface AgentGraphProps {
     sessionId: number;
 }
 
-// Mapping Sections to Agents
+// SOTA Mapping: Sections to Agents (FormQAR-054 and MDCG 2022-21 aligned)
 const AGENT_MAP: Record<string, string> = {
-    'A': 'Diana',
-    'B': 'Sam',
-    'C': 'Raj',
-    'D': 'Vera',
-    'E': 'Carla',
-    'F': 'Tara',
-    'G': 'Frank',
-    'H': 'Cameron',
-    'I': 'Rita',
-    'J': 'Brianna',
-    'K': 'Eddie',
-    'L': 'Clara',
-    'M': 'Marcus'
+    'A': 'Marcus',    // Executive Summary
+    'B': 'Greta',     // Scope and Device Description
+    'C': 'Greta',     // Post-Market Data: Units Distributed
+    'D': 'David',     // Serious Incidents and Trends
+    'E': 'Emma',      // Post-Market Surveillance: Customer Feedback
+    'F': 'Emma',      // Complaints Management
+    'G': 'Diana',     // Trends and Performance Analysis
+    'H': 'Lisa',      // Field Safety Corrective Actions (FSCA)
+    'I': 'Tom',       // Corrective and Preventive Actions (CAPA)
+    'J': 'James',     // Literature Review and External Data
+    'K': 'James',     // External Adverse Event Databases
+    'L': 'Sarah',     // Post-Market Clinical Follow-up (PMCF)
+    'M': 'Robert'     // Overall Findings and Conclusions
 };
 
+// SOTA Agent Roles (MDCG 2022-21 aligned)
 const AGENT_ROLES: Record<string, string> = {
-    'Diana': 'Device Identification',
-    'Sam': 'Scope & Doc',
-    'Raj': 'Sales Data',
-    'Vera': 'Vigilance',
-    'Carla': 'Complaints',
-    'Tara': 'Trending',
-    'Frank': 'FSCA',
-    'Cameron': 'CAPA',
-    'Rita': 'Risk Mgmt',
-    'Brianna': 'Benefit-Risk',
-    'Eddie': 'Literature',
-    'Clara': 'PMCF',
-    'Marcus': 'Synthesis',
     'Alex': 'Orchestrator',
-    'Victoria': 'QC Validator',
+    'Marcus': 'Executive Summary',
+    'Greta': 'Sales & Market Data',
+    'David': 'Vigilance Specialist',
+    'Emma': 'Complaint Classifier',
+    'Diana': 'Trend Detective',
+    'Lisa': 'FSCA Coordinator',
+    'Tom': 'CAPA Verifier',
+    'James': 'Literature Reviewer',
+    'Sarah': 'PMCF Specialist',
+    'Robert': 'Risk Specialist',
+    'Victoria': 'QC Expert',
     'Data Core': 'System Data'
 };
 
