@@ -29,13 +29,11 @@ class Settings(BaseSettings):
     xai_api_key: Optional[str] = None  # Grok API
     perplexity_api_key: Optional[str] = None
     
-    # Model configs - See: https://platform.openai.com/docs/models, https://docs.x.ai/docs/models
-    openai_model_default: str = "gpt-5.2"  # Latest: gpt-5.2, gpt-5-mini, gpt-5-nano, gpt-4.1
-    anthropic_model_orchestrator: str = "claude-3-5-sonnet-20241022"
-    anthropic_model_synthesis: str = "claude-3-5-sonnet-20241022"
-    anthropic_model_fast: str = "claude-3-5-haiku-20241022"
-    google_model_default: str = "gemini-2.0-flash-exp"
-    xai_model_default: str = "grok-4-1-fast-non-reasoning"  # Latest: grok-4-1-fast-*, grok-4-fast-*, grok-4
+    # Model configs - Reasoning models for all agents
+    openai_model_default: str = "gpt-5.2-2025-12-11"
+    anthropic_model_default: str = "claude-opus-4-5-20250220"
+    google_model_default: str = "gemini-2.5-pro"
+    xai_model_default: str = "grok-4-1-fast-reasoning"
     
     # Database
     database_url: str = "sqlite:///./psur_system.db"
@@ -61,7 +59,7 @@ def get_available_providers() -> dict[str, str]:
         available["openai"] = settings.openai_model_default
     
     if settings.anthropic_api_key:
-        available["anthropic"] = settings.anthropic_model_orchestrator
+        available["anthropic"] = settings.anthropic_model_default
     
     if settings.google_api_key:
         available["google"] = settings.google_model_default
@@ -129,15 +127,16 @@ class AgentConfig:
 
 # SOTA Agent configurations - Aligned with MDCG 2022-21 and FormQAR-054
 # Each agent has specific expertise and section responsibility
+# All agents use reasoning models for higher quality output
 AGENT_CONFIGS = {
     # Orchestrator - Workflow coordination
     "Alex": AgentConfig(
         name="Alex",
         role="Orchestrator",
         ai_provider="anthropic",
-        model=settings.anthropic_model_orchestrator,
+        model=settings.anthropic_model_default,
         temperature=0.5,
-        max_tokens=4000,
+        max_tokens=8000,
     ),
 
     # Section A - Executive Summary (synthesizes all findings)
@@ -145,9 +144,9 @@ AGENT_CONFIGS = {
         name="Marcus",
         role="Executive Summary Specialist",
         ai_provider="anthropic",
-        model=settings.anthropic_model_synthesis,
+        model=settings.anthropic_model_default,
         temperature=0.6,
-        max_tokens=8000,
+        max_tokens=16000,
     ),
 
     # Section B, C - Scope & Sales Data
@@ -157,7 +156,7 @@ AGENT_CONFIGS = {
         ai_provider="openai",
         model=settings.openai_model_default,
         temperature=0.5,
-        max_tokens=4000,
+        max_tokens=8000,
     ),
 
     # Section D - Serious Incidents & Vigilance
@@ -165,9 +164,9 @@ AGENT_CONFIGS = {
         name="David",
         role="Vigilance Specialist",
         ai_provider="anthropic",
-        model=settings.anthropic_model_orchestrator,
+        model=settings.anthropic_model_default,
         temperature=0.4,
-        max_tokens=4000,
+        max_tokens=8000,
     ),
 
     # Sections E, F - Customer Feedback & Complaints Management
@@ -177,7 +176,7 @@ AGENT_CONFIGS = {
         ai_provider="openai",
         model=settings.openai_model_default,
         temperature=0.5,
-        max_tokens=6000,
+        max_tokens=8000,
     ),
 
     # Section G - Trends & Statistical Analysis
@@ -185,9 +184,9 @@ AGENT_CONFIGS = {
         name="Diana",
         role="Trend Detective",
         ai_provider="anthropic",
-        model=settings.anthropic_model_synthesis,
+        model=settings.anthropic_model_default,
         temperature=0.4,
-        max_tokens=5000,
+        max_tokens=8000,
     ),
 
     # Section H - Field Safety Corrective Actions
@@ -197,7 +196,7 @@ AGENT_CONFIGS = {
         ai_provider="google",
         model=settings.google_model_default,
         temperature=0.5,
-        max_tokens=4000,
+        max_tokens=8000,
     ),
 
     # Section I - CAPA Implementation
@@ -207,17 +206,17 @@ AGENT_CONFIGS = {
         ai_provider="openai",
         model=settings.openai_model_default,
         temperature=0.5,
-        max_tokens=4000,
+        max_tokens=8000,
     ),
 
     # Sections J, K - Literature & External Databases
     "James": AgentConfig(
         name="James",
         role="Literature Reviewer",
-        ai_provider="perplexity",
-        model="sonar",
+        ai_provider="google",
+        model=settings.google_model_default,
         temperature=0.6,
-        max_tokens=5000,
+        max_tokens=8000,
     ),
 
     # Section L - PMCF Activities
@@ -227,7 +226,7 @@ AGENT_CONFIGS = {
         ai_provider="google",
         model=settings.google_model_default,
         temperature=0.5,
-        max_tokens=4000,
+        max_tokens=8000,
     ),
 
     # Section M - Benefit-Risk & Conclusions
@@ -235,9 +234,9 @@ AGENT_CONFIGS = {
         name="Robert",
         role="Risk Specialist",
         ai_provider="anthropic",
-        model=settings.anthropic_model_orchestrator,
+        model=settings.anthropic_model_default,
         temperature=0.4,
-        max_tokens=6000,
+        max_tokens=16000,
     ),
 
     # QC Validator - Reviews all sections
@@ -247,7 +246,7 @@ AGENT_CONFIGS = {
         ai_provider="openai",
         model=settings.openai_model_default,
         temperature=0.3,
-        max_tokens=4000,
+        max_tokens=8000,
     ),
 }
 

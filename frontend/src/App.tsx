@@ -3,7 +3,7 @@ import { ArrowLeft, Download } from 'lucide-react';
 import { SessionSetup } from './components/SessionSetup';
 import { SessionList } from './components/SessionList';
 import { DiscussionForum } from './components/DiscussionForum';
-import { AgentGraph } from './components/AgentGraph';
+import { NeuralView } from './components/NeuralView';
 import { api, Session } from './api';
 import './App.css';
 
@@ -144,9 +144,9 @@ function App() {
                     {sessionId != null ? <DiscussionForum sessionId={sessionId} /> : null}
                 </div>
 
-                {/* Right Sidebar: Agent Network Graph */}
+                {/* Right Sidebar: Neural View */}
                 <aside className="sidebar-agents" style={{ padding: 0, overflow: 'hidden', background: '#0B0D11' }}>
-                    <AgentGraph sessionId={sessionId!} />
+                    <NeuralView sessionId={sessionId!} />
                 </aside>
             </main>
 

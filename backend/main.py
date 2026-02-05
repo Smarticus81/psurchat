@@ -83,6 +83,9 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Global orchestrator tracking for pause/resume functionality
+active_orchestrators: Dict[int, SOTAOrchestrator] = {}
+
 # ============================================================================
 # REST API ENDPOINTS
 # ============================================================================
@@ -257,12 +260,48 @@ async def upload_file(
         analysis = result["summary"]
         metadata = result["metadata"]
         
+        # Build column detection diagnostics message
+        columns_detected = metadata.get("columns_detected", {})
+        all_columns = metadata.get("all_columns", [])
+        diagnostics_lines = []
+        
+        if file_type == "sales":
+            units_col = columns_detected.get("units")
+            year_col = columns_detected.get("year")
+            diagnostics_lines.append(f"Units Column: {units_col if units_col else 'NOT FOUND'}")
+            diagnostics_lines.append(f"Year Column: {year_col if year_col else 'NOT FOUND'}")
+            if not units_col:
+                diagnostics_lines.append(f"WARNING: Could not detect units/quantity column. Available: {all_columns}")
+        elif file_type == "complaints":
+            severity_col = columns_detected.get("severity")
+            closure_col = columns_detected.get("closure")
+            type_col = columns_detected.get("type")
+            root_cause_col = columns_detected.get("root_cause")
+            diagnostics_lines.append(f"Severity Column: {severity_col if severity_col else 'NOT FOUND'}")
+            diagnostics_lines.append(f"Closure/Status Column: {closure_col if closure_col else 'NOT FOUND'}")
+            diagnostics_lines.append(f"Type Column: {type_col if type_col else 'NOT FOUND'}")
+            diagnostics_lines.append(f"Root Cause Column: {root_cause_col if root_cause_col else 'NOT FOUND'}")
+            if not severity_col:
+                diagnostics_lines.append(f"WARNING: No severity column detected. Available: {all_columns}")
+        elif file_type in ("vigilance", "maude"):
+            type_col = columns_detected.get("type")
+            diagnostics_lines.append(f"Event Type Column: {type_col if type_col else 'NOT FOUND'}")
+        
+        diagnostics_section = "\n".join(diagnostics_lines) if diagnostics_lines else ""
+        record_count = metadata.get("record_count", 0)
+        
         # Save analysis as a system message so agents can see it
         analysis_msg = ChatMessage(
             session_id=session_id,
             from_agent="System",
             to_agent="all",
-            message=f"Data Analysis: {file_type.upper()}\n\n{analysis}",
+            message=f"""Data Analysis: {file_type.upper()} ({file.filename})
+
+**Records Found:** {record_count}
+**Columns Detected:**
+{diagnostics_section}
+
+{analysis}""",
             message_type="system"
         )
         db.add(analysis_msg)
@@ -359,6 +398,82 @@ async def set_master_context_intake(
         db.rollback()
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sessions/{session_id}/validate")
+async def validate_session_data(session_id: int, db: Session = Depends(get_db)):
+    """Check if uploaded data can be parsed correctly before starting generation."""
+    try:
+        session = db.query(PSURSession).filter(PSURSession.id == session_id).first()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        data_files = db.query(DataFile).filter(DataFile.session_id == session_id).all()
+        period_start = getattr(session, "period_start", None)
+        period_end = getattr(session, "period_end", None)
+        intake = getattr(session, "master_context_intake", None) or {}
+
+        issues: List[Dict[str, str]] = []
+        
+        # Check for required file types
+        file_types = [f.file_type for f in data_files]
+        if "sales" not in file_types:
+            issues.append({"severity": "warning", "message": "No sales/distribution data file uploaded. Units distributed will be 0."})
+        if "complaints" not in file_types:
+            issues.append({"severity": "warning", "message": "No complaints data file uploaded. Complaint analysis will be limited."})
+        if len(data_files) == 0:
+            issues.append({"severity": "error", "message": "No data files uploaded. Please upload at least one data file."})
+
+        # Run extraction and report what was found
+        master_context = MasterContextExtractor.extract(data_files, period_start, period_end, intake)
+        
+        # Check extraction results
+        if master_context["exposure_denominator_value"] == 0:
+            issues.append({
+                "severity": "error", 
+                "message": "Could not extract units distributed. Check sales file column names. Looking for: units, quantity, qty, sold, distributed, shipped, volume, amount, count"
+            })
+        
+        if master_context["total_complaints_canonical"] > 0:
+            column_mapping = master_context.get("column_mapping", {})
+            complaints_mapping = column_mapping.get("complaints", {})
+            if not complaints_mapping.get("severity_column"):
+                issues.append({
+                    "severity": "warning", 
+                    "message": "Complaints found but severity column not detected. Severity analysis will be limited."
+                })
+            if not complaints_mapping.get("closure_column"):
+                issues.append({
+                    "severity": "warning", 
+                    "message": "Complaints found but closure/status column not detected. Investigation status cannot be determined."
+                })
+        
+        # Add any parsing warnings from the extractor
+        for warning in master_context.get("parsing_warnings", []):
+            issues.append({"severity": "warning", "message": warning})
+        
+        # Determine overall validity (errors = can't proceed, warnings = proceed with caution)
+        has_errors = any(i["severity"] == "error" for i in issues)
+        
+        return {
+            "valid": not has_errors,
+            "issues": issues,
+            "extracted_data": {
+                "exposure_denominator_value": master_context["exposure_denominator_value"],
+                "total_complaints_canonical": master_context["total_complaints_canonical"],
+                "complaints_closed_canonical": master_context["complaints_closed_canonical"],
+                "annual_units_canonical": master_context["annual_units_canonical"],
+                "has_sales": master_context["has_sales"],
+                "has_complaints": master_context["has_complaints"],
+                "has_vigilance": master_context["has_vigilance"],
+                "column_mapping": master_context.get("column_mapping", {}),
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
 
 
 @app.post("/api/sessions/{session_id}/start")
@@ -593,6 +708,200 @@ async def create_message(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ============================================================================
+# INTERACTIVE WORKFLOW CONTROL ENDPOINTS
+# ============================================================================
+
+@app.post("/api/sessions/{session_id}/pause")
+async def pause_workflow(session_id: int, db: Session = Depends(get_db)):
+    """Pause the workflow at the next checkpoint."""
+    try:
+        if session_id not in active_orchestrators:
+            raise HTTPException(status_code=404, detail="No active workflow for this session")
+        
+        orchestrator = active_orchestrators[session_id]
+        success = orchestrator.request_pause()
+        
+        if success:
+            # Broadcast pause status
+            await manager.broadcast({
+                "type": "workflow_paused",
+                "session_id": session_id
+            })
+            return {"status": "pausing", "message": "Workflow will pause at next checkpoint"}
+        else:
+            return {"status": "not_running", "message": "Workflow is not currently running"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/sessions/{session_id}/resume")
+async def resume_workflow(session_id: int, db: Session = Depends(get_db)):
+    """Resume a paused workflow."""
+    try:
+        if session_id not in active_orchestrators:
+            raise HTTPException(status_code=404, detail="No active workflow for this session")
+        
+        orchestrator = active_orchestrators[session_id]
+        success = orchestrator.request_resume()
+        
+        if success:
+            # Broadcast resume status
+            await manager.broadcast({
+                "type": "workflow_resumed",
+                "session_id": session_id
+            })
+            return {"status": "resumed", "message": "Workflow has resumed"}
+        else:
+            return {"status": "not_paused", "message": "Workflow is not currently paused"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class AskAgentInput(BaseModel):
+    agent: str
+    question: str
+
+
+@app.post("/api/sessions/{session_id}/ask")
+async def ask_agent(session_id: int, input: AskAgentInput, db: Session = Depends(get_db)):
+    """Ask a specific agent a direct question."""
+    try:
+        # Validate agent exists
+        if input.agent not in AGENT_CONFIGS:
+            raise HTTPException(status_code=400, detail=f"Unknown agent: {input.agent}")
+        
+        # Check if session exists
+        session = db.query(PSURSession).filter(PSURSession.id == session_id).first()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # First, post the user's question to the chat
+        user_msg = ChatMessage(
+            session_id=session_id,
+            from_agent="User",
+            to_agent=input.agent,
+            message=input.question,
+            message_type="normal",
+            timestamp=datetime.utcnow(),
+            processed=False
+        )
+        db.add(user_msg)
+        db.commit()
+        db.refresh(user_msg)
+        
+        # Broadcast user message
+        await manager.broadcast({
+            "type": "new_message",
+            "data": {
+                "id": user_msg.id,
+                "from_agent": "User",
+                "to_agent": input.agent,
+                "message": input.question,
+                "message_type": "normal",
+                "timestamp": user_msg.timestamp.isoformat() if user_msg.timestamp else None
+            }
+        })
+        
+        # Get or create orchestrator for context
+        if session_id in active_orchestrators:
+            orchestrator = active_orchestrators[session_id]
+        else:
+            orchestrator = SOTAOrchestrator(session_id)
+            # Initialize context if not already done
+            if orchestrator.context is None:
+                await orchestrator._initialize_context()
+        
+        # Get agent response
+        result = await orchestrator.ask_agent_directly(input.agent, input.question)
+        
+        # Mark user message as processed
+        user_msg.processed = True
+        db.commit()
+        
+        if result.get("error"):
+            return {
+                "status": "error",
+                "error": result["error"],
+                "agent": input.agent
+            }
+        
+        return {
+            "status": "ok",
+            "response": result.get("response"),
+            "agent": input.agent
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sessions/{session_id}/workflow-status")
+async def get_workflow_status(session_id: int, db: Session = Depends(get_db)):
+    """Get current workflow status including pause state."""
+    try:
+        # Check if session exists
+        session = db.query(PSURSession).filter(PSURSession.id == session_id).first()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Get workflow state from database
+        workflow_state = db.query(WorkflowState).filter(
+            WorkflowState.session_id == session_id
+        ).first()
+        
+        # Check if there's an active orchestrator
+        orchestrator_active = session_id in active_orchestrators
+        orchestrator_status = None
+        
+        if orchestrator_active:
+            orchestrator_status = active_orchestrators[session_id].get_workflow_status()
+        
+        return {
+            "session_id": session_id,
+            "session_status": session.status,
+            "orchestrator_active": orchestrator_active,
+            "workflow_state": {
+                "status": workflow_state.status if workflow_state else "not_started",
+                "current_section": workflow_state.current_section if workflow_state else None,
+                "sections_completed": workflow_state.sections_completed if workflow_state else 0,
+                "total_sections": workflow_state.total_sections if workflow_state else 13,
+                "paused": workflow_state.paused if workflow_state else False,
+                "current_agent": workflow_state.current_agent if workflow_state else None
+            } if workflow_state else None,
+            "orchestrator_status": orchestrator_status
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/agents")
+async def list_agents():
+    """List all available agents and their roles."""
+    agents = []
+    for name, config in AGENT_CONFIGS.items():
+        agents.append({
+            "name": name,
+            "role": config.role,
+            "ai_provider": config.ai_provider,
+            "model": config.model
+        })
+    return {"agents": agents}
+
+
 @app.get("/api/sessions/{session_id}/document/download")
 async def download_document(session_id: int, db: Session = Depends(get_db)):
     """Download complete PSUR as DOCX"""
@@ -736,6 +1045,9 @@ async def run_orchestrator(session_id: int):
     try:
         print(f"\nStarting SOTA orchestrator for session {session_id}...")
         orchestrator = SOTAOrchestrator(session_id)
+        
+        # Register orchestrator for pause/resume/ask functionality
+        active_orchestrators[session_id] = orchestrator
 
         # Broadcast start
         await manager.broadcast({
@@ -766,6 +1078,10 @@ async def run_orchestrator(session_id: int):
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         })
+    finally:
+        # Clean up orchestrator reference
+        if session_id in active_orchestrators:
+            del active_orchestrators[session_id]
 
 # Expose manager for use by agents
 def broadcast_message(message: dict):

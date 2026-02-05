@@ -10,9 +10,20 @@ regulatory validation.
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from enum import Enum
 import json
 import asyncio
 import traceback
+
+
+class WorkflowStatus(Enum):
+    """Workflow execution states for interactive control"""
+    IDLE = "idle"
+    RUNNING = "running"
+    PAUSED = "paused"
+    WAITING_USER = "waiting_user"
+    COMPLETE = "complete"
+    ERROR = "error"
 
 from sqlalchemy.orm import Session
 from backend.database.session import get_db_context
@@ -21,6 +32,16 @@ from backend.database.models import (
     WorkflowState, DataFile
 )
 from backend.config import AGENT_CONFIGS, get_ai_client
+
+# GRKB (Graph Regulatory Knowledge Base) integration
+GRKB_AVAILABLE = False
+get_grkb_client = None  # type: ignore
+try:
+    from backend.database.grkb_client import get_grkb_client as _get_grkb_client, GRKBClient
+    get_grkb_client = _get_grkb_client
+    GRKB_AVAILABLE = True
+except ImportError:
+    GRKBClient = None
 
 
 # =============================================================================
@@ -225,6 +246,28 @@ class PSURContext:
     data_availability_complaint_closures_complete: bool = False
     data_availability_rmf_hazard_list: bool = False
     data_availability_intended_use: bool = False
+
+    # Global constraints (locked terminology and definitions for cross-section consistency)
+    global_constraints: Dict[str, Any] = field(default_factory=dict)
+
+    # GRKB regulatory grounding (from external knowledge base)
+    grkb_obligations: List[Dict[str, Any]] = field(default_factory=list)
+    grkb_sections: List[Dict[str, Any]] = field(default_factory=list)
+    grkb_evidence_types: List[Dict[str, Any]] = field(default_factory=list)
+    grkb_system_instructions: Dict[str, Any] = field(default_factory=dict)
+    grkb_template: Dict[str, Any] = field(default_factory=dict)
+    grkb_available: bool = False
+
+    # =========================================================================
+    # RAW DATA SAMPLES (actual records for agent context)
+    # =========================================================================
+
+    sales_raw_sample: str = ""  # First 20 rows of sales data as markdown table
+    complaints_raw_sample: str = ""  # First 20 rows of complaints data as markdown table
+    vigilance_raw_sample: str = ""  # First 20 rows of vigilance data as markdown table
+    sales_columns_detected: List[str] = field(default_factory=list)
+    complaints_columns_detected: List[str] = field(default_factory=list)
+    vigilance_columns_detected: List[str] = field(default_factory=list)
 
     def calculate_metrics(self):
         """Calculate derived metrics from raw data"""
@@ -453,7 +496,32 @@ This PSUR must comply with the following hierarchy (in order of precedence):
 
 ---
 
-## XI. CRITICAL COMPLIANCE RULES FOR ALL AGENTS
+## XI. RAW DATA SAMPLES (Actual Records for Reference)
+
+{f'''### SALES DATA SAMPLE (First 20 Records)
+Columns detected: {', '.join(self.sales_columns_detected) if self.sales_columns_detected else 'None'}
+
+{self.sales_raw_sample if self.sales_raw_sample else 'No sales data sample available.'}
+''' if self.sales_raw_sample else '### SALES DATA: No raw sample available'}
+
+{f'''### COMPLAINTS DATA SAMPLE (First 20 Records)
+Columns detected: {', '.join(self.complaints_columns_detected) if self.complaints_columns_detected else 'None'}
+
+{self.complaints_raw_sample if self.complaints_raw_sample else 'No complaints data sample available.'}
+
+**IMPORTANT**: Use this raw data to understand actual complaint details, investigation outcomes,
+and severity classifications. Do not invent details not present in this data.
+''' if self.complaints_raw_sample else '### COMPLAINTS DATA: No raw sample available'}
+
+{f'''### VIGILANCE DATA SAMPLE (First 20 Records)
+Columns detected: {', '.join(self.vigilance_columns_detected) if self.vigilance_columns_detected else 'None'}
+
+{self.vigilance_raw_sample if self.vigilance_raw_sample else 'No vigilance data sample available.'}
+''' if self.vigilance_raw_sample else '### VIGILANCE DATA: No raw sample available'}
+
+---
+
+## XII. CRITICAL COMPLIANCE RULES FOR ALL AGENTS
 
 ### Rule 1: ABSOLUTE DATA INTEGRITY
 - Every number must trace to source data
@@ -962,10 +1030,321 @@ def get_temporal_continuity_context(context: PSURContext) -> str:
 
 
 # =============================================================================
+# SECTION 3B: GLOBAL CONSTRAINTS (Cross-Section Consistency)
+# =============================================================================
+
+def build_global_constraints(context: PSURContext) -> Dict[str, Any]:
+    """
+    Build locked global constraints that ALL agents must use.
+    These definitions cannot be changed or reinterpreted by any agent.
+    """
+    investigation_closure_rate = context.investigation_closure_rate
+    complaints_closed = context.complaints_closed_canonical or context.complaints_with_root_cause
+    total_complaints = context.total_complaints
+
+    # Determine if root causes can be cited as definitive
+    root_cause_status = "preliminary"
+    if investigation_closure_rate >= 80:
+        root_cause_status = "confirmed"
+    elif investigation_closure_rate >= 50:
+        root_cause_status = "partial"
+
+    # Determine serious incident classification certainty
+    si_classification_certainty = "inconclusive"
+    if investigation_closure_rate >= 80 and total_complaints > 0:
+        si_classification_certainty = "confirmed"
+    elif investigation_closure_rate >= 50:
+        si_classification_certainty = "provisional"
+
+    # RMF status
+    rmf_status = "complete" if context.data_availability_rmf_hazard_list else "incomplete_or_unavailable"
+
+    # Vigilance methodology
+    vigilance_methodology = "internal_only"
+    if context.data_availability_external_vigilance:
+        vigilance_methodology = "internal_and_external_databases"
+
+    return {
+        # Locked denominators (from master context)
+        "exposure_denominator": context.exposure_denominator_golden or context.total_units_sold,
+        "exposure_denominator_scope": context.exposure_denominator_scope,
+        "annual_units": context.annual_units_golden or context.total_units_by_year,
+
+        # Severity level definitions (unified hierarchy)
+        "severity_levels": {
+            "critical": "Death or permanent impairment directly attributable to device",
+            "serious": "Hospitalization, intervention required, or temporary impairment",
+            "moderate": "Medically significant but not requiring intervention",
+            "minor": "No injury, user inconvenience only",
+            "unknown": "Severity not determinable from available data",
+        },
+
+        # Root cause categories (locked)
+        "root_cause_categories": {
+            "product_defect": "Manufacturing, design, or material defect confirmed",
+            "user_error": "Misuse or failure to follow IFU confirmed",
+            "unrelated": "Event unrelated to device confirmed",
+            "indeterminate": "Insufficient evidence to determine causality",
+            "pending": "Investigation not yet complete",
+        },
+
+        # Investigation status
+        "investigation_closure_rate_percent": investigation_closure_rate,
+        "complaints_closed_count": complaints_closed,
+        "total_complaints_count": total_complaints,
+        "root_cause_status": root_cause_status,
+        "si_classification_certainty": si_classification_certainty,
+
+        # RMF and vigilance
+        "rmf_status": rmf_status,
+        "vigilance_methodology": vigilance_methodology,
+
+        # Data completeness flags
+        "external_vigilance_searched": context.data_availability_external_vigilance,
+        "complaint_closures_complete": context.data_availability_complaint_closures_complete,
+        "rmf_hazard_list_available": context.data_availability_rmf_hazard_list,
+        "intended_use_provided": context.data_availability_intended_use,
+
+        # Inference policy
+        "inference_policy": context.inference_policy,
+    }
+
+
+def get_global_constraints_prompt(constraints: Dict[str, Any]) -> str:
+    """Generate the global constraints block for agent prompts."""
+    closure_rate = constraints.get("investigation_closure_rate_percent", 0)
+    root_status = constraints.get("root_cause_status", "preliminary")
+    si_certainty = constraints.get("si_classification_certainty", "inconclusive")
+    rmf_status = constraints.get("rmf_status", "incomplete_or_unavailable")
+    vig_method = constraints.get("vigilance_methodology", "internal_only")
+    inference = constraints.get("inference_policy", "strictly_factual")
+    denom = constraints.get("exposure_denominator", 0)
+    denom_scope = constraints.get("exposure_denominator_scope", "reporting_period_only")
+    annual = constraints.get("annual_units", {})
+    closed = constraints.get("complaints_closed_count", 0)
+    total = constraints.get("total_complaints_count", 0)
+
+    annual_str = ", ".join([f"{y}: {u:,}" for y, u in sorted(annual.items())]) if annual else "None"
+
+    severity_defs = constraints.get("severity_levels", {})
+    severity_str = "; ".join([f"{k.upper()}: {v}" for k, v in severity_defs.items()])
+
+    root_cause_defs = constraints.get("root_cause_categories", {})
+    rc_str = "; ".join([f"{k}: {v}" for k, v in root_cause_defs.items()])
+
+    # Build constraint rules based on closure rate
+    closure_rules = ""
+    if closure_rate < 50:
+        closure_rules = f"""
+CRITICAL: Investigation closure is {closure_rate:.0f}% (below 50%).
+- Root cause classifications MUST be labeled as PRELIMINARY or PROVISIONAL.
+- Do NOT assign definitive root causes.
+- Serious incident classifications MUST be labeled as INCONCLUSIVE.
+- Trend analyses MUST be framed as LIMITED or NON-ACTIONABLE.
+- Do NOT claim complete investigation outcomes."""
+    elif closure_rate < 80:
+        closure_rules = f"""
+NOTE: Investigation closure is {closure_rate:.0f}% (partial).
+- Root cause classifications may be labeled as PROVISIONAL.
+- Serious incident classifications are PROVISIONAL pending remaining investigations.
+- State the limitation in trend conclusions."""
+    else:
+        closure_rules = f"""
+NOTE: Investigation closure is {closure_rate:.0f}% (substantially complete).
+- Root cause classifications may be labeled as CONFIRMED where evidence supports.
+- Serious incident classifications may be stated with confidence where investigation complete."""
+
+    return f"""
+================================================================================
+              GLOBAL CONSTRAINTS - ALL AGENTS MUST FOLLOW
+================================================================================
+
+These definitions are LOCKED. No agent may redefine, reinterpret, or contradict them.
+
+## 1. EXPOSURE DENOMINATOR (Single Source)
+- Value: {denom:,} units
+- Scope: {denom_scope}
+- Annual breakdown: {annual_str}
+USE ONLY THESE FIGURES for all rate calculations. Do not derive alternate denominators.
+
+## 2. COMPLAINT INVESTIGATION STATUS
+- Total complaints: {total}
+- Complaints with closed investigation: {closed}
+- Investigation closure rate: {closure_rate:.1f}%
+- Root cause status: {root_status.upper()}
+- Serious incident classification certainty: {si_certainty.upper()}
+{closure_rules}
+
+## 3. SEVERITY LEVEL DEFINITIONS (Unified Hierarchy)
+{severity_str}
+USE ONLY THESE DEFINITIONS. Do not invent alternate severity categories.
+
+## 4. ROOT CAUSE CATEGORIES (Locked)
+{rc_str}
+USE ONLY THESE CATEGORIES. If investigation incomplete, use "pending" or "indeterminate".
+
+## 5. RISK MANAGEMENT FILE (RMF) STATUS
+- Status: {rmf_status.upper().replace('_', ' ')}
+{"- Do NOT reference, reproduce, or assume RMF hazard list content." if rmf_status != "complete" else "- RMF hazard list may be referenced."}
+
+## 6. VIGILANCE METHODOLOGY
+- Methodology: {vig_method.upper().replace('_', ' ')}
+{"- Do NOT claim external database searches were performed." if vig_method == "internal_only" else "- External vigilance database results may be cited."}
+{"- State explicitly: 'No external vigilance database search was conducted for this period.'" if vig_method == "internal_only" else ""}
+
+## 7. INFERENCE POLICY
+- Policy: {inference.upper().replace('_', ' ')}
+{"- Do NOT infer, assume, or fill gaps. State 'Data not available' where absent." if inference == "strictly_factual" else "- Reasonable inference permitted; label as such."}
+
+## 8. CROSS-SECTION CONSISTENCY RULES
+- If content is already addressed in another section, REFERENCE it (e.g., 'As detailed in Section C...') instead of repeating.
+- All sections must use the same denominator ({denom:,} units).
+- All sections must use the same complaint total ({total}) and closure count ({closed}).
+- All sections must use the same severity definitions.
+- Conclusions in Section M must reflect actual data limitations, not assumed best practice.
+- Executive Summary (A) must summarize only what is actually in the document.
+
+## 9. BREVITY REQUIREMENTS
+- Use short paragraphs (4 sentences maximum per paragraph).
+- No bullet points anywhere.
+- No redundant restatement of the same fact across sections.
+- No over-explanation of regulatory citations or internal procedures.
+- Be concise; write for a regulator who values precision over verbosity.
+
+================================================================================
+"""
+
+
+def get_grkb_regulatory_context(section_id: str, context: PSURContext) -> str:
+    """Generate GRKB regulatory grounding context for agent prompts."""
+    if not context.grkb_available:
+        return ""
+    
+    lines = []
+    lines.append("================================================================================")
+    lines.append("              GRKB REGULATORY GROUNDING")
+    lines.append("================================================================================")
+    lines.append("")
+    
+    # Find matching section from GRKB
+    grkb_section = None
+    for sec in context.grkb_sections:
+        if sec.get("section_id", "").endswith(section_id) or section_id in sec.get("section_id", ""):
+            grkb_section = sec
+            break
+    
+    if grkb_section:
+        lines.append(f"## Section Definition (from GRKB)")
+        lines.append(f"- Section: {grkb_section.get('section_number', '')} - {grkb_section.get('title', '')}")
+        if grkb_section.get("description"):
+            lines.append(f"- Description: {grkb_section['description']}")
+        if grkb_section.get("regulatory_basis"):
+            lines.append(f"- Regulatory Basis: {grkb_section['regulatory_basis']}")
+        if grkb_section.get("mandatory"):
+            lines.append(f"- Status: MANDATORY")
+        if grkb_section.get("minimum_word_count"):
+            lines.append(f"- Minimum Word Count: {grkb_section['minimum_word_count']}")
+        if grkb_section.get("required_evidence_types"):
+            lines.append(f"- Required Evidence: {', '.join(grkb_section['required_evidence_types'])}")
+        lines.append("")
+    
+    # Find relevant obligations
+    relevant_obligations = []
+    for obl in context.grkb_obligations[:20]:  # Limit to avoid prompt bloat
+        obl_id = obl.get("obligation_id", "")
+        # Match based on section (e.g., ART86, ANNEX_I, etc.)
+        if section_id in obl_id or "86" in obl_id:
+            relevant_obligations.append(obl)
+    
+    if relevant_obligations:
+        lines.append("## Applicable Regulatory Obligations")
+        for obl in relevant_obligations[:5]:  # Limit to top 5
+            lines.append(f"- {obl.get('obligation_id', 'N/A')}: {obl.get('title', 'N/A')}")
+            if obl.get("source_citation"):
+                lines.append(f"  Source: {obl['source_citation']}")
+            if obl.get("mandatory"):
+                lines.append(f"  Status: MANDATORY")
+        lines.append("")
+    
+    # Add relevant evidence type definitions
+    if context.grkb_evidence_types:
+        lines.append("## Evidence Type Definitions")
+        for et in context.grkb_evidence_types[:5]:
+            lines.append(f"- {et.get('display_name', et.get('evidence_type_id', 'N/A'))}: {et.get('description', '')[:100]}")
+        lines.append("")
+    
+    lines.append("================================================================================")
+    lines.append("")
+    
+    return "\n".join(lines)
+
+
+# =============================================================================
 # SECTION 4: AGENT SYSTEM PROMPTS
 # =============================================================================
 
-def get_agent_system_prompt(agent_name: str, section_id: str, context: PSURContext) -> str:
+def get_previous_sections_summary(session_id: int, current_section_id: str) -> str:
+    """
+    Get summaries of previously completed sections for inter-agent context.
+    Enables agents to reference and build upon each other's work.
+    """
+    # Determine which sections come before this one
+    current_idx = WORKFLOW_ORDER.index(current_section_id) if current_section_id in WORKFLOW_ORDER else 0
+    previous_section_ids = WORKFLOW_ORDER[:current_idx]
+    
+    if not previous_section_ids:
+        return ""
+    
+    with get_db_context() as db:
+        sections = db.query(SectionDocument).filter(
+            SectionDocument.session_id == session_id,
+            SectionDocument.section_id.in_(previous_section_ids),
+            SectionDocument.status.in_(["draft", "approved"])
+        ).all()
+        
+        if not sections:
+            return ""
+        
+        summaries = []
+        for sec in sections:
+            section_id = getattr(sec, "section_id", "")
+            section_name = getattr(sec, "section_name", "")
+            content = getattr(sec, "content", "") or ""
+            author = getattr(sec, "author_agent", "")
+            
+            # Extract key facts from the content (first 800 chars as summary)
+            summary_text = content[:800].strip()
+            if len(content) > 800:
+                # Find a good breaking point
+                last_period = summary_text.rfind(".")
+                if last_period > 400:
+                    summary_text = summary_text[:last_period + 1]
+                summary_text += " [...]"
+            
+            summaries.append(f"""
+### Section {section_id}: {section_name}
+*Generated by: {author}*
+
+{summary_text}
+""")
+        
+        if not summaries:
+            return ""
+        
+        return f"""
+## Previously Generated Sections (Reference Only)
+
+The following sections have been completed by your colleagues. You may reference their findings 
+but do NOT repeat information they have already covered. Instead, cross-reference:
+e.g., "As detailed in Section C, the total distribution was X units."
+
+{''.join(summaries)}
+
+---
+"""
+
+
+def get_agent_system_prompt(agent_name: str, section_id: str, context: PSURContext, session_id: int = 0) -> str:
     """Generate comprehensive system prompt for an agent."""
 
     agent = AGENT_ROLES.get(agent_name, {})
@@ -1061,14 +1440,24 @@ Do NOT:
 - Include template language or placeholder examples
 - Minimize or downplay identified issues
 - Fabricate data
+- Repeat information already covered in other sections; reference instead
+- Write verbose paragraphs; keep each under 4 sentences
 
 ---
+
+{get_global_constraints_prompt(context.global_constraints) if context.global_constraints else ''}
+
+{get_grkb_regulatory_context(section_id, context)}
+
+{get_previous_sections_summary(session_id, section_id) if session_id else ''}
 
 {context.to_comprehensive_context_prompt()}
 
 ---
 
 Now generate Section {section_id}: {section.get('name', '')} following all requirements above.
+Write concisely. Maximum 4 sentences per paragraph. No bullet points.
+Reference findings from previous sections where relevant - do not repeat them.
 """
 
     return base_prompt
@@ -1133,6 +1522,8 @@ Period: {context.period_start.strftime('%d %B %Y') if context.period_start else 
 Total Units: {context.total_units_sold:,}
 Total Complaints: {context.total_complaints}
 
+{get_global_constraints_prompt(context.global_constraints) if context.global_constraints else ''}
+
 ## Section Content to Review:
 
 {section_content}
@@ -1141,17 +1532,25 @@ Total Complaints: {context.total_complaints}
 
 ## Your Task
 
-Review the section content above and provide:
+Review the section content above and validate against:
+1. FormQAR-054 template requirements
+2. MDCG 2022-21 guidelines
+3. **GLOBAL CONSTRAINTS** (CRITICAL - any deviation is a FAIL)
+
+Provide:
 
 1. **VERDICT**: PASS / CONDITIONAL / FAIL
+   - FAIL if: wrong denominator, wrong totals, definitive root causes when closure <80%, bullet points used, paragraphs >4 sentences
+   - CONDITIONAL if: minor issues, missing cross-references
+   - PASS if: fully compliant
 
-2. **Findings**: List any issues found in each validation category
+2. **Findings**: List any issues found
 
-3. **Specific Corrections**: If CONDITIONAL or FAIL, provide exact text corrections needed
+3. **Specific Corrections**: Exact text corrections needed
 
-4. **Recommendation**: What the author agent should do to achieve PASS status
+4. **Recommendation**: What to fix
 
-Be thorough but fair. Minor stylistic issues should not cause a FAIL. Focus on regulatory compliance and data accuracy.
+Be strict on global constraints. Any use of a different denominator than {context.total_units_sold:,} is an automatic FAIL.
 """
 
 
@@ -1171,11 +1570,267 @@ class SOTAOrchestrator:
         self.current_phase = "initialization"
         self.sections_completed = []
         self.max_qc_iterations = 3
+        
+        # Interactive workflow state
+        self.workflow_status: WorkflowStatus = WorkflowStatus.IDLE
+        self.pending_user_response: Optional[int] = None
+        self.current_agent: Optional[str] = None
+        self._pause_requested: bool = False
+
+    # =========================================================================
+    # WORKFLOW STATE MANAGEMENT
+    # =========================================================================
+
+    def request_pause(self) -> bool:
+        """Request workflow to pause at next checkpoint."""
+        if self.workflow_status == WorkflowStatus.RUNNING:
+            self._pause_requested = True
+            return True
+        return False
+
+    def request_resume(self) -> bool:
+        """Request workflow to resume from paused state."""
+        if self.workflow_status == WorkflowStatus.PAUSED:
+            self._pause_requested = False
+            self.workflow_status = WorkflowStatus.RUNNING
+            self._sync_workflow_state_to_db()
+            return True
+        return False
+
+    def get_workflow_status(self) -> Dict[str, Any]:
+        """Get current workflow status."""
+        return {
+            "status": self.workflow_status.value,
+            "current_agent": self.current_agent,
+            "current_phase": self.current_phase,
+            "sections_completed": len(self.sections_completed),
+            "total_sections": len(WORKFLOW_ORDER),
+            "paused": self.workflow_status == WorkflowStatus.PAUSED,
+            "pending_user_response": self.pending_user_response
+        }
+
+    def _sync_workflow_state_to_db(self):
+        """Sync workflow state to database for persistence."""
+        with get_db_context() as db:
+            workflow_state = db.query(WorkflowState).filter(
+                WorkflowState.session_id == self.session_id
+            ).first()
+            
+            if workflow_state:
+                setattr(workflow_state, "status", self.workflow_status.value)
+                setattr(workflow_state, "paused", self.workflow_status == WorkflowStatus.PAUSED)
+                setattr(workflow_state, "pending_user_response", self.pending_user_response)
+                setattr(workflow_state, "current_agent", self.current_agent)
+                setattr(workflow_state, "sections_completed", len(self.sections_completed))
+                db.commit()
+
+    async def _handle_pause_checkpoint(self):
+        """Check if pause was requested and handle it."""
+        if self._pause_requested:
+            self.workflow_status = WorkflowStatus.PAUSED
+            self._sync_workflow_state_to_db()
+            
+            await self._post_message("Alex", "all",
+                "Workflow paused by user request. Send a message or click Resume to continue.",
+                "system")
+            
+            # Wait until resume is requested
+            while self.workflow_status == WorkflowStatus.PAUSED:
+                await asyncio.sleep(1)
+                # Check for user messages while paused
+                await self._check_and_handle_interventions()
+            
+            await self._post_message("Alex", "all",
+                "Workflow resumed. Continuing PSUR generation...",
+                "system")
+
+    async def _check_and_handle_interventions(self):
+        """
+        Check for unprocessed user messages and have agents respond.
+        This enables real user-agent interaction during workflow execution.
+        """
+        with get_db_context() as db:
+            # Get user messages that haven't been processed
+            # We use message_metadata to track processed status until the model is updated
+            user_messages = db.query(ChatMessage).filter(
+                ChatMessage.session_id == self.session_id,
+                ChatMessage.from_agent == "User"
+            ).order_by(ChatMessage.timestamp.desc()).limit(20).all()
+            
+            unprocessed = []
+            for msg in user_messages:
+                metadata = getattr(msg, "message_metadata", None) or {}
+                if not metadata.get("processed", False):
+                    unprocessed.append({
+                        "id": msg.id,
+                        "message": msg.message,
+                        "to_agent": msg.to_agent,
+                        "timestamp": msg.timestamp
+                    })
+            
+            if not unprocessed:
+                return
+            
+            # Process each unprocessed message (oldest first)
+            for msg_data in reversed(unprocessed):
+                await self._respond_to_user_message(msg_data, db)
+                
+                # Mark as processed
+                msg = db.query(ChatMessage).filter(ChatMessage.id == msg_data["id"]).first()
+                if msg:
+                    existing_metadata = getattr(msg, "message_metadata", None) or {}
+                    existing_metadata["processed"] = True
+                    existing_metadata["processed_at"] = datetime.utcnow().isoformat()
+                    setattr(msg, "message_metadata", existing_metadata)
+                    db.commit()
+
+    async def _respond_to_user_message(self, msg_data: Dict[str, Any], db: Session):
+        """Generate and post a response to a user message."""
+        user_message = msg_data.get("message", "")
+        target_agent = msg_data.get("to_agent", "all")
+        
+        # Parse @mentions from the message
+        mentioned_agents = []
+        for agent_name in AGENT_CONFIGS.keys():
+            if f"@{agent_name}" in user_message:
+                mentioned_agents.append(agent_name)
+        
+        # Determine responding agent
+        if mentioned_agents:
+            responding_agent = mentioned_agents[0]
+        elif target_agent != "all" and target_agent in AGENT_CONFIGS:
+            responding_agent = target_agent
+        elif self.current_agent and self.current_agent in AGENT_CONFIGS:
+            responding_agent = self.current_agent
+        else:
+            responding_agent = "Alex"  # Default to orchestrator
+        
+        agent_config = AGENT_CONFIGS.get(responding_agent, AGENT_CONFIGS.get("Alex"))
+        if not agent_config:
+            return
+        
+        # Build response prompt
+        context_summary = ""
+        if self.context:
+            context_summary = f"""
+Current context:
+- Device: {self.context.device_name}
+- Current phase: {self.current_phase}
+- Sections completed: {', '.join(self.sections_completed) if self.sections_completed else 'None yet'}
+"""
+        
+        system_prompt = f"""You are {responding_agent}, {agent_config.role} in the PSUR generation team.
+You are responding to a user intervention during PSUR generation.
+
+{context_summary}
+
+Keep your response:
+- Professional and helpful
+- Concise (2-4 sentences unless detail is needed)
+- Actionable if they're requesting changes
+- Informative if they're asking questions
+
+Do not use bullet points. Write in clear prose."""
+
+        user_prompt = f"""The user has sent this message during PSUR generation:
+
+"{user_message}"
+
+Respond appropriately as {responding_agent}."""
+
+        try:
+            response = await self._call_ai(responding_agent, system_prompt, user_prompt)
+            
+            if response:
+                await self._post_message(
+                    responding_agent,
+                    "User",
+                    response,
+                    "normal"
+                )
+        except Exception as e:
+            await self._post_message(
+                responding_agent,
+                "User",
+                f"I received your message but encountered an issue responding: {str(e)}. The workflow will continue.",
+                "warning"
+            )
+
+    async def ask_agent_directly(self, agent_name: str, question: str) -> Dict[str, Any]:
+        """
+        Directly ask a specific agent a question and get a response.
+        Used by the /ask API endpoint for immediate agent interaction.
+        """
+        if agent_name not in AGENT_CONFIGS:
+            return {"error": f"Unknown agent: {agent_name}", "response": None}
+        
+        agent_config = AGENT_CONFIGS[agent_name]
+        
+        # Build context
+        context_summary = ""
+        if self.context:
+            context_summary = f"""
+Current PSUR context:
+- Device: {self.context.device_name}
+- Period: {self.context.period_start.strftime('%Y-%m-%d') if self.context.period_start else 'TBD'} to {self.context.period_end.strftime('%Y-%m-%d') if self.context.period_end else 'TBD'}
+- Your sections: Check what sections you're responsible for
+- Sections completed: {', '.join(self.sections_completed) if self.sections_completed else 'None yet'}
+"""
+
+        # Get previously generated content for this agent's sections
+        previous_content = await self._get_agent_sections_content(agent_name)
+        if previous_content:
+            context_summary += f"\n\nYour generated content so far:\n{previous_content[:2000]}..."
+
+        system_prompt = f"""You are {agent_name}, {agent_config.role}.
+You are answering a direct question from the user about the PSUR generation process.
+
+{context_summary}
+
+Respond directly and helpfully. If you don't know something, say so.
+Keep responses concise but complete."""
+
+        user_prompt = f"""User question: {question}"""
+
+        try:
+            response = await self._call_ai(agent_name, system_prompt, user_prompt)
+            
+            # Post to discussion forum so it's visible
+            await self._post_message(agent_name, "User", response or "No response generated.", "normal")
+            
+            return {"response": response, "agent": agent_name, "error": None}
+        except Exception as e:
+            return {"error": str(e), "response": None, "agent": agent_name}
+
+    async def _get_agent_sections_content(self, agent_name: str) -> str:
+        """Get content from sections this agent has generated."""
+        with get_db_context() as db:
+            sections = db.query(SectionDocument).filter(
+                SectionDocument.session_id == self.session_id,
+                SectionDocument.author_agent == agent_name,
+                SectionDocument.status.in_(["draft", "approved"])
+            ).all()
+            
+            if not sections:
+                return ""
+            
+            content_parts = []
+            for sec in sections:
+                section_id = getattr(sec, "section_id", "")
+                content = getattr(sec, "content", "")
+                if content:
+                    content_parts.append(f"=== Section {section_id} ===\n{content[:1000]}")
+            
+            return "\n\n".join(content_parts)
 
     async def execute_workflow(self) -> Dict[str, Any]:
         """Execute the complete PSUR generation workflow."""
 
         try:
+            # Set workflow to running
+            self.workflow_status = WorkflowStatus.RUNNING
+            self._sync_workflow_state_to_db()
+            
             # Phase 0: Initialize context
             await self._post_message("Alex", "all",
                 "Initializing PSUR generation workflow. Loading session data and building regulatory context...",
@@ -1195,9 +1850,14 @@ class SOTAOrchestrator:
                 "normal")
 
             for section_id in WORKFLOW_ORDER:
+                # Check for pause/intervention before each section
+                await self._handle_pause_checkpoint()
+                await self._check_and_handle_interventions()
+                
                 section_def = SECTION_DEFINITIONS.get(section_id, {})
                 agent_name = section_def.get("agent", "Alex")
-
+                
+                self.current_agent = agent_name
                 await self._update_workflow_state(section_id)
                 await self._set_agent_status(agent_name, "working")
 
@@ -1212,12 +1872,20 @@ class SOTAOrchestrator:
                     await self._post_message("Alex", "all",
                         f"Warning: Section {section_id} generation encountered issues. Continuing workflow...",
                         "warning")
+                
+                # Check for interventions after each section
+                await self._check_and_handle_interventions()
 
             # Final synthesis
             await self._perform_final_synthesis()
 
             # Update session status
             await self._complete_session()
+            
+            # Mark workflow as complete
+            self.workflow_status = WorkflowStatus.COMPLETE
+            self.current_agent = None
+            self._sync_workflow_state_to_db()
 
             return {
                 "status": "complete",
@@ -1227,6 +1895,9 @@ class SOTAOrchestrator:
 
         except Exception as e:
             traceback.print_exc()
+            self.workflow_status = WorkflowStatus.ERROR
+            self._sync_workflow_state_to_db()
+            
             await self._post_message("Alex", "all",
                 f"Workflow error: {str(e)}. Please check logs for details.",
                 "error")
@@ -1380,6 +2051,12 @@ class SOTAOrchestrator:
             ])
             self.context.completeness_score = max(0.0, min(100.0, (n_available / 4.0) * 100.0 - (len(missing) * 5.0)))
 
+            # Load GRKB regulatory grounding
+            await self._load_grkb_context()
+
+            # Build global constraints (locked terminology for cross-section consistency)
+            self.context.global_constraints = build_global_constraints(self.context)
+
             await self._post_message("Alex", "all",
                 f"Context initialized. Device: {self.context.device_name}, "
                 f"UDI-DI: {self.context.udi_di}, "
@@ -1387,6 +2064,144 @@ class SOTAOrchestrator:
                 f"Sales data: {'Available' if self.context.sales_data_available else 'Not available'}, "
                 f"Complaint data: {'Available' if self.context.complaint_data_available else 'Not available'}",
                 "success")
+
+            # Report global constraints status
+            gc = self.context.global_constraints
+            await self._post_message("Alex", "all",
+                f"Global constraints locked. Denominator: {gc.get('exposure_denominator', 0):,} units. "
+                f"Investigation closure: {gc.get('investigation_closure_rate_percent', 0):.1f}%. "
+                f"Root cause status: {gc.get('root_cause_status', 'unknown').upper()}. "
+                f"Inference policy: {gc.get('inference_policy', 'strictly_factual').upper()}.",
+                "normal")
+
+    async def _load_grkb_context(self):
+        """Load regulatory grounding from GRKB (Graph Regulatory Knowledge Base)."""
+        if self.context is None:
+            return
+        
+        if not GRKB_AVAILABLE or get_grkb_client is None:
+            await self._post_message("Alex", "all",
+                "GRKB client not available. Using built-in regulatory definitions only.",
+                "warning")
+            return
+        
+        try:
+            grkb = get_grkb_client()  # type: ignore
+            if not grkb.connect():
+                await self._post_message("Alex", "all",
+                    "Could not connect to GRKB database. Using built-in regulatory definitions.",
+                    "warning")
+                return
+            
+            # Load full regulatory context
+            template_id = "MDCG_2022_21_ANNEX_I"
+            
+            # Load template
+            template = grkb.get_template(template_id)
+            if template:
+                self.context.grkb_template = template
+            
+            # Load sections
+            sections = grkb.get_all_sections(template_id)
+            if sections:
+                self.context.grkb_sections = sections
+            
+            # Load obligations
+            obligations = grkb.get_all_obligations("EU_MDR")
+            if obligations:
+                self.context.grkb_obligations = obligations
+            
+            # Load evidence types
+            evidence_types = grkb.get_all_evidence_types()
+            if evidence_types:
+                self.context.grkb_evidence_types = evidence_types
+            
+            # Load system instructions
+            instructions = grkb.get_all_system_instructions()
+            if instructions:
+                self.context.grkb_system_instructions = {
+                    inst["key"]: inst for inst in instructions
+                }
+            
+            # Try to load device dossier if we have a device code
+            if self.context.device_name:
+                dossier = grkb.get_device_dossier(self.context.device_name)
+                if dossier.get("clinical_context"):
+                    cc = dossier["clinical_context"]
+                    if cc.get("intended_purpose") and not self.context.intended_use:
+                        self.context.intended_use = cc["intended_purpose"]
+                    # Store indications/contraindications in data quality warnings for agent context
+                    if cc.get("indications"):
+                        self.context.data_quality_warnings.append(
+                            f"Indications from GRKB: {', '.join(cc['indications'][:5])}"
+                        )
+                    if cc.get("contraindications"):
+                        self.context.data_quality_warnings.append(
+                            f"Contraindications from GRKB: {', '.join(cc['contraindications'][:5])}"
+                        )
+                
+                if dossier.get("risk_context"):
+                    rc = dossier["risk_context"]
+                    if rc.get("principal_risks"):
+                        self.context.known_residual_risks = [
+                            f"{r.get('hazard', 'Unknown')}: {r.get('harm', 'Unknown')}"
+                            for r in rc["principal_risks"]
+                        ]
+                    if rc.get("risk_thresholds"):
+                        thresholds = rc["risk_thresholds"]
+                        if thresholds.get("complaintRateThreshold"):
+                            # Store threshold for use in trend analysis
+                            self.context.data_quality_warnings.append(
+                                f"Complaint rate threshold from RMF: {thresholds['complaintRateThreshold']}%"
+                            )
+            
+            self.context.grkb_available = True
+            
+            await self._post_message("Alex", "all",
+                f"GRKB regulatory grounding loaded: {len(obligations)} obligations, "
+                f"{len(sections)} sections, {len(evidence_types)} evidence types.",
+                "success")
+            
+        except Exception as e:
+            await self._post_message("Alex", "all",
+                f"Error loading GRKB context: {str(e)}. Using built-in definitions.",
+                "warning")
+
+    # Expanded column detection keywords (matching MasterContextExtractor)
+    UNITS_KEYWORDS = [
+        'units', 'quantity', 'qty', 'sold', 'distributed', 'shipped',
+        'volume', 'amount', 'count', 'total', 'devices', 'pieces',
+        'inventory', 'stock', 'dispatched', 'delivered', 'sales_qty',
+        'unit_count', 'num_units', 'number'
+    ]
+    YEAR_KEYWORDS = [
+        'year', 'date', 'period', 'fiscal', 'quarter', 'month',
+        'time', 'calendar', 'reporting', 'ship_date', 'sale_date',
+        'transaction_date', 'order_date'
+    ]
+    REGION_KEYWORDS = [
+        'region', 'country', 'market', 'territory', 'geography',
+        'location', 'area', 'state', 'zone', 'district'
+    ]
+    SEVERITY_KEYWORDS = [
+        'severity', 'priority', 'level', 'criticality', 'grade',
+        'impact', 'harm', 'seriousness', 'classification', 'risk_level',
+        'risk', 'class', 'category', 'importance', 'urgency', 'tier'
+    ]
+    TYPE_KEYWORDS = [
+        'type', 'category', 'classification', 'complaint_type',
+        'issue_type', 'event_type', 'incident_type', 'kind'
+    ]
+    ROOT_CAUSE_KEYWORDS = [
+        'root', 'cause', 'determination', 'finding', 'reason',
+        'root_cause', 'failure', 'failure_mode', 'defect', 'issue',
+        'problem', 'analysis', 'conclusion', 'attribution'
+    ]
+    CLOSURE_KEYWORDS = [
+        'closed', 'closure', 'status', 'investigation', 'state',
+        'resolved', 'complete', 'outcome', 'disposition', 'final',
+        'investigation_status', 'case_status', 'resolution', 'result'
+    ]
 
     async def _extract_sales_data(self, data_file: DataFile):
         """Extract sales metrics from uploaded file."""
@@ -1402,22 +2217,32 @@ class SOTAOrchestrator:
             _filename = getattr(data_file, "filename", "") or ""
             if _filename.endswith('.csv'):
                 df = pd.read_csv(io.StringIO(content))
+            elif _filename.endswith(('.xls', '.xlsx')):
+                df = pd.read_excel(io.BytesIO(_file_data) if isinstance(_file_data, bytes) else io.BytesIO(content.encode()), 
+                                   engine='openpyxl' if _filename.endswith('.xlsx') else None)
             else:
                 return
 
-            # Look for common sales column names
+            # Look for common sales column names with expanded keywords
             units_col = None
             year_col = None
             region_col = None
 
             for col in df.columns:
                 col_lower = col.lower()
-                if any(term in col_lower for term in ['units', 'quantity', 'sold', 'distributed']):
+                if units_col is None and any(term in col_lower for term in self.UNITS_KEYWORDS):
                     units_col = col
-                if any(term in col_lower for term in ['year', 'date', 'period']):
+                if year_col is None and any(term in col_lower for term in self.YEAR_KEYWORDS):
                     year_col = col
-                if any(term in col_lower for term in ['region', 'country', 'market', 'territory']):
+                if region_col is None and any(term in col_lower for term in self.REGION_KEYWORDS):
                     region_col = col
+
+            # Fallback: use first numeric column if no units column found
+            if units_col is None:
+                for col in df.columns:
+                    if pd.api.types.is_numeric_dtype(df[col]):
+                        units_col = col
+                        break
 
             if units_col:
                 self.context.total_units_sold = int(df[units_col].sum())
@@ -1438,6 +2263,18 @@ class SOTAOrchestrator:
                 self.context.total_units_by_region = {str(k): int(v) for k, v in regional.items() if v is not None}
                 self.context.regions = [str(x) for x in regional.index]
 
+            # Store raw data sample (first 20 rows as markdown)
+            try:
+                df_sample = df.head(20).copy()
+                # Truncate long string values
+                for col in df_sample.columns:
+                    if df_sample[col].dtype == 'object':
+                        df_sample[col] = df_sample[col].astype(str).str.slice(0, 50)
+                self.context.sales_raw_sample = df_sample.to_markdown(index=False) or ""
+                self.context.sales_columns_detected = list(df.columns)
+            except Exception:
+                pass
+
         except Exception as e:
             print(f"Error extracting sales data: {e}")
 
@@ -1455,43 +2292,70 @@ class SOTAOrchestrator:
             _filename = getattr(data_file, "filename", "") or ""
             if _filename.endswith('.csv'):
                 df = pd.read_csv(io.StringIO(content))
+            elif _filename.endswith(('.xls', '.xlsx')):
+                df = pd.read_excel(io.BytesIO(_file_data) if isinstance(_file_data, bytes) else io.BytesIO(content.encode()), 
+                                   engine='openpyxl' if _filename.endswith('.xlsx') else None)
             else:
                 return
 
             self.context.total_complaints = len(df)
 
-            # Look for type/category columns
+            # Look for type/category columns with expanded keywords
             for col in df.columns:
                 col_lower = col.lower()
-                if any(term in col_lower for term in ['type', 'category', 'classification']):
+                if any(term in col_lower for term in self.TYPE_KEYWORDS):
                     type_counts = df[col].value_counts().to_dict()
                     self.context.complaints_by_type = {str(k): int(v) for k, v in type_counts.items()}
                     break
 
-            # Look for severity columns
+            # Look for severity columns with expanded keywords
             for col in df.columns:
                 col_lower = col.lower()
-                if any(term in col_lower for term in ['severity', 'priority', 'level']):
+                if any(term in col_lower for term in self.SEVERITY_KEYWORDS):
                     severity_counts = df[col].value_counts().to_dict()
                     self.context.complaints_by_severity = {str(k): int(v) for k, v in severity_counts.items()}
                     break
 
-            # Look for root cause columns
+            # Look for root cause columns with expanded keywords
             for col in df.columns:
                 col_lower = col.lower()
-                if any(term in col_lower for term in ['root', 'cause', 'determination', 'finding']):
+                if any(term in col_lower for term in self.ROOT_CAUSE_KEYWORDS):
                     cause_counts = df[col].value_counts().to_dict()
                     for cause, count in cause_counts.items():
                         cause_lower = str(cause).lower()
-                        if any(term in cause_lower for term in ['defect', 'product', 'manufacturing', 'design']):
+                        if any(term in cause_lower for term in ['defect', 'product', 'manufacturing', 'design', 'quality']):
                             self.context.complaints_product_defect += int(count)
-                        elif any(term in cause_lower for term in ['user', 'error', 'misuse']):
+                        elif any(term in cause_lower for term in ['user', 'error', 'misuse', 'operator', 'training']):
                             self.context.complaints_user_error += int(count)
-                        elif any(term in cause_lower for term in ['unrelated', 'environmental', 'patient']):
+                        elif any(term in cause_lower for term in ['unrelated', 'environmental', 'patient', 'external', 'no_fault']):
                             self.context.complaints_unrelated += int(count)
                         else:
                             self.context.complaints_unconfirmed += int(count)
                     break
+
+            # Look for closure/investigation status columns
+            for col in df.columns:
+                col_lower = col.lower()
+                if any(term in col_lower for term in self.CLOSURE_KEYWORDS):
+                    try:
+                        closed_vals = df[col].astype(str).str.lower()
+                        closed_count = int((closed_vals.str.contains(r'closed|complete|resolved|done|finalized|investigated|concluded|finished', case=False, na=False)).sum())
+                        self.context.complaints_with_root_cause = closed_count
+                    except Exception:
+                        pass
+                    break
+
+            # Store raw data sample (first 20 rows as markdown)
+            try:
+                df_sample = df.head(20).copy()
+                # Truncate long string values
+                for col in df_sample.columns:
+                    if df_sample[col].dtype == 'object':
+                        df_sample[col] = df_sample[col].astype(str).str.slice(0, 50)
+                self.context.complaints_raw_sample = df_sample.to_markdown(index=False) or ""
+                self.context.complaints_columns_detected = list(df.columns)
+            except Exception:
+                pass
 
         except Exception as e:
             print(f"Error extracting complaint data: {e}")
@@ -1510,26 +2374,42 @@ class SOTAOrchestrator:
             _filename = getattr(data_file, "filename", "") or ""
             if _filename.endswith('.csv'):
                 df = pd.read_csv(io.StringIO(content))
+            elif _filename.endswith(('.xls', '.xlsx')):
+                df = pd.read_excel(io.BytesIO(_file_data) if isinstance(_file_data, bytes) else io.BytesIO(content.encode()), 
+                                   engine='openpyxl' if _filename.endswith('.xlsx') else None)
             else:
                 return
 
             self.context.serious_incidents = len(df)
 
-            # Look for severity/type columns
+            # Look for severity/type columns with expanded keywords
+            type_keywords = ['type', 'category', 'outcome', 'event', 'incident', 'classification', 'result', 'harm']
             for col in df.columns:
                 col_lower = col.lower()
-                if any(term in col_lower for term in ['type', 'category', 'outcome']):
+                if any(term in col_lower for term in type_keywords):
                     type_counts = df[col].value_counts().to_dict()
                     self.context.serious_incidents_by_type = {str(k): int(v) for k, v in type_counts.items()}
 
                     # Count deaths and injuries
                     for incident_type, count in type_counts.items():
                         type_lower = str(incident_type).lower()
-                        if 'death' in type_lower:
+                        if any(term in type_lower for term in ['death', 'fatal', 'deceased', 'mortality']):
                             self.context.deaths += int(count)
-                        elif 'injur' in type_lower:
+                        elif any(term in type_lower for term in ['injur', 'harm', 'serious', 'hospitali']):
                             self.context.serious_injuries += int(count)
                     break
+
+            # Store raw data sample (first 20 rows as markdown)
+            try:
+                df_sample = df.head(20).copy()
+                # Truncate long string values
+                for col in df_sample.columns:
+                    if df_sample[col].dtype == 'object':
+                        df_sample[col] = df_sample[col].astype(str).str.slice(0, 50)
+                self.context.vigilance_raw_sample = df_sample.to_markdown(index=False) or ""
+                self.context.vigilance_columns_detected = list(df.columns)
+            except Exception:
+                pass
 
         except Exception as e:
             print(f"Error extracting vigilance data: {e}")
@@ -1575,8 +2455,8 @@ class SOTAOrchestrator:
         if ctx is None:
             return False
         try:
-            # Generate initial content
-            system_prompt = get_agent_system_prompt(agent_name, section_id, ctx)
+            # Generate initial content with inter-agent context
+            system_prompt = get_agent_system_prompt(agent_name, section_id, ctx, self.session_id)
 
             user_prompt = f"""
 Generate Section {section_id}: {section_name} for the PSUR.
@@ -1717,11 +2597,14 @@ Generate the complete revised section.
         return revised if revised else content
 
     async def _perform_final_synthesis(self):
-        """Perform final synthesis and consistency check."""
+        """Perform final synthesis and cross-section consistency validation."""
 
         await self._post_message("Alex", "all",
-            "All sections complete. Performing final synthesis and consistency verification...",
+            "All sections complete. Performing cross-section consistency validation...",
             "normal")
+
+        # Cross-section validation phase
+        await self._validate_cross_section_consistency()
 
         # Update workflow to complete
         with get_db_context() as db:
@@ -1741,6 +2624,80 @@ Generate the complete revised section.
             f"{len(self.sections_completed)} sections successfully generated and approved. "
             f"Document is ready for download.",
             "success")
+
+    async def _validate_cross_section_consistency(self):
+        """Validate consistency across all generated sections using global constraints."""
+        if self.context is None:
+            return
+
+        gc = self.context.global_constraints
+        if not gc:
+            return
+
+        await self._post_message("Victoria", "all",
+            "Running cross-section consistency checks against global constraints...",
+            "normal")
+
+        # Load all generated sections
+        with get_db_context() as db:
+            sections = db.query(SectionDocument).filter(
+                SectionDocument.session_id == self.session_id,
+                SectionDocument.status.in_(["approved", "draft"])
+            ).all()
+
+            if not sections:
+                return
+
+            # Build consistency check prompt
+            sections_text = "\n\n".join([
+                f"=== SECTION {getattr(s, 'section_id', 'unknown')}: {getattr(s, 'section_name', '')} ===\n{getattr(s, 'content', '')[:2000]}..."
+                for s in sections
+            ])
+
+            denominator = gc.get("exposure_denominator", 0)
+            total_complaints = gc.get("total_complaints_count", 0)
+            closure_rate = gc.get("investigation_closure_rate_percent", 0)
+            root_status = gc.get("root_cause_status", "preliminary")
+
+            check_prompt = f"""
+You are Victoria, the QC validator. Review the following PSUR sections for cross-section consistency.
+
+GLOBAL CONSTRAINTS (these are LOCKED and must be used consistently):
+- Exposure denominator: {denominator:,} units
+- Total complaints: {total_complaints}
+- Investigation closure rate: {closure_rate:.1f}%
+- Root cause status: {root_status.upper()}
+
+Check for these issues:
+1. Different denominators used across sections (must all use {denominator:,})
+2. Different complaint totals cited (must all use {total_complaints})
+3. Root causes stated as definitive when closure rate is {closure_rate:.1f}% (only allowed if >=80%)
+4. Sections contradicting each other on data availability
+5. Excessive repetition of the same facts across sections
+6. Bullet points used anywhere (forbidden)
+7. Paragraphs longer than 4 sentences
+
+SECTIONS TO REVIEW:
+{sections_text}
+
+Output a brief consistency report (max 200 words). List any issues found or state "No consistency issues detected."
+"""
+
+            try:
+                system_prompt = "You are Victoria, the QC validator. Your task is to check PSUR sections for cross-section consistency. Be strict about global constraints violations."
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self._call_ai_sync("Victoria", system_prompt, check_prompt)
+                )
+
+                if response:
+                    await self._post_message("Victoria", "all",
+                        f"Consistency validation complete: {response[:500]}",
+                        "normal")
+            except Exception as e:
+                await self._post_message("Victoria", "all",
+                    f"Consistency check encountered an error: {str(e)}",
+                    "warning")
 
     async def _complete_session(self):
         """Mark session as complete."""

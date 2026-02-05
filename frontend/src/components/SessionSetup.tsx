@@ -1,8 +1,28 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, X, FileText, Calendar, Server, ChevronDown, ChevronUp } from 'lucide-react';
+import { Upload, X, FileText, Calendar, Server, ChevronDown, ChevronUp, AlertCircle, CheckCircle, AlertTriangle } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { api } from '../api';
 import './SessionSetup.css';
+
+interface ValidationIssue {
+    severity: 'error' | 'warning';
+    message: string;
+}
+
+interface ValidationResult {
+    valid: boolean;
+    issues: ValidationIssue[];
+    extracted_data: {
+        exposure_denominator_value: number;
+        total_complaints_canonical: number;
+        complaints_closed_canonical: number;
+        annual_units_canonical: Record<string, number>;
+        has_sales: boolean;
+        has_complaints: boolean;
+        has_vigilance: boolean;
+        column_mapping: Record<string, unknown>;
+    };
+}
 
 interface SessionSetupProps {
     onSessionCreated: (sessionId: number) => void;
@@ -24,9 +44,36 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
     const [complaintClosuresComplete, setComplaintClosuresComplete] = useState(false);
     const [rmfHazardListAvailable, setRmfHazardListAvailable] = useState(false);
     const [intendedUseProvided, setIntendedUseProvided] = useState(false);
+    const [fileTypes, setFileTypes] = useState<Record<string, string>>({});
+    
+    // Validation state
+    const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+    const [pendingSessionId, setPendingSessionId] = useState<number | null>(null);
+    const [isValidating, setIsValidating] = useState(false);
+
+    // Infer file type from filename as initial suggestion
+    const inferFileType = (filename: string): string => {
+        const name = filename.toLowerCase();
+        if (name.includes('complaint')) return 'complaints';
+        if (name.includes('sales') || name.includes('distribution')) return 'sales';
+        if (name.includes('risk') || name.includes('rmf')) return 'risk';
+        if (name.includes('cer') || name.includes('clinical')) return 'cer';
+        if (name.includes('vigilance') || name.includes('maude') || name.includes('incident')) return 'vigilance';
+        return 'sales'; // Default to sales instead of 'other'
+    };
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
         setFiles(prev => [...prev, ...acceptedFiles]);
+        // Set initial file types based on filename inference
+        setFileTypes(prev => {
+            const newTypes = { ...prev };
+            for (const file of acceptedFiles) {
+                if (!newTypes[file.name]) {
+                    newTypes[file.name] = inferFileType(file.name);
+                }
+            }
+            return newTypes;
+        });
     }, []);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -40,7 +87,19 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
     });
 
     const removeFile = (index: number) => {
+        const fileToRemove = files[index];
         setFiles(files.filter((_, i) => i !== index));
+        if (fileToRemove) {
+            setFileTypes(prev => {
+                const newTypes = { ...prev };
+                delete newTypes[fileToRemove.name];
+                return newTypes;
+            });
+        }
+    };
+
+    const updateFileType = (filename: string, type: string) => {
+        setFileTypes(prev => ({ ...prev, [filename]: type }));
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -51,6 +110,8 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
         }
 
         setIsSubmitting(true);
+        setValidationResult(null);
+        
         try {
             // 1. Create Session
             const session = await api.createSession(
@@ -60,15 +121,9 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
                 endDate
             );
 
-            // 2. Upload Files
+            // 2. Upload Files with user-selected types
             for (const file of files) {
-                let type = 'other';
-                const name = file.name.toLowerCase();
-                if (name.includes('complaint')) type = 'complaints';
-                else if (name.includes('sales')) type = 'sales';
-                else if (name.includes('risk') || name.includes('rmf')) type = 'risk';
-                else if (name.includes('cer') || name.includes('clinical')) type = 'cer';
-                else if (name.includes('vigilance') || name.includes('maude')) type = 'vigilance';
+                const type = fileTypes[file.name] || 'sales';
                 await api.uploadFile(session.session_id, file, type);
             }
 
@@ -88,10 +143,21 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
                 // 404 or other: intake endpoint may be missing on older backend; continue
             }
 
-            // 4. Transition to dashboard/chat immediately so user sees the interface
+            // 4. Run validation before proceeding
+            setIsValidating(true);
+            const validation = await api.validateSession(session.session_id);
+            setValidationResult(validation);
+            setPendingSessionId(session.session_id);
+            setIsValidating(false);
+            
+            // If there are errors, stop and show results
+            if (!validation.valid) {
+                setIsSubmitting(false);
+                return;
+            }
+            
+            // 5. No errors - proceed to generation
             onSessionCreated(session.session_id);
-
-            // 5. Start generation in background (extractor runs first, then orchestrator)
             api.startGeneration(session.session_id).catch((err) => {
                 console.error('Start generation failed:', err);
             });
@@ -100,7 +166,23 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
             alert('Failed to create session. Check console.');
         } finally {
             setIsSubmitting(false);
+            setIsValidating(false);
         }
+    };
+    
+    const proceedWithWarnings = () => {
+        if (pendingSessionId) {
+            onSessionCreated(pendingSessionId);
+            api.startGeneration(pendingSessionId).catch((err) => {
+                console.error('Start generation failed:', err);
+            });
+        }
+    };
+    
+    const cancelAndRestart = () => {
+        // Reset validation state but keep the form data
+        setValidationResult(null);
+        setPendingSessionId(null);
     };
 
     return (
@@ -168,9 +250,21 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
                         {files.length > 0 && (
                             <div className="file-list">
                                 {files.map((file, idx) => (
-                                    <div key={idx} className="file-item">
+                                    <div key={idx} className="file-item file-item-with-type">
                                         <FileText size={14} color="#57C7E3" />
                                         <span className="file-name">{file.name}</span>
+                                        <select
+                                            className="file-type-select"
+                                            value={fileTypes[file.name] || 'sales'}
+                                            onChange={(e) => updateFileType(file.name, e.target.value)}
+                                        >
+                                            <option value="sales">Sales/Distribution</option>
+                                            <option value="complaints">Complaints</option>
+                                            <option value="vigilance">Vigilance/MAUDE</option>
+                                            <option value="risk">Risk Management</option>
+                                            <option value="cer">Clinical Evaluation</option>
+                                            <option value="pmcf">PMCF Data</option>
+                                        </select>
                                         <button type="button" onClick={() => removeFile(idx)} className="remove-file">
                                             <X size={14} />
                                         </button>
@@ -277,15 +371,71 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
                         )}
                     </div>
 
+                    {/* Validation Results */}
+                    {validationResult && (
+                        <div className="validation-results" style={{ gridColumn: 'span 2' }}>
+                            <div className={`validation-header ${validationResult.valid ? 'valid' : 'invalid'}`}>
+                                {validationResult.valid ? (
+                                    <><CheckCircle size={18} /> Data Validation Passed</>
+                                ) : (
+                                    <><AlertCircle size={18} /> Data Issues Detected</>
+                                )}
+                            </div>
+                            
+                            {validationResult.issues.length > 0 && (
+                                <div className="validation-issues">
+                                    {validationResult.issues.map((issue, idx) => (
+                                        <div key={idx} className={`validation-issue ${issue.severity}`}>
+                                            {issue.severity === 'error' ? (
+                                                <AlertCircle size={14} />
+                                            ) : (
+                                                <AlertTriangle size={14} />
+                                            )}
+                                            <span>{issue.message}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            
+                            <div className="validation-summary">
+                                <div className="summary-row">
+                                    <span>Units Distributed:</span>
+                                    <span className={validationResult.extracted_data.exposure_denominator_value === 0 ? 'value-error' : 'value-ok'}>
+                                        {validationResult.extracted_data.exposure_denominator_value.toLocaleString()}
+                                    </span>
+                                </div>
+                                <div className="summary-row">
+                                    <span>Total Complaints:</span>
+                                    <span>{validationResult.extracted_data.total_complaints_canonical}</span>
+                                </div>
+                                <div className="summary-row">
+                                    <span>Closed Complaints:</span>
+                                    <span>{validationResult.extracted_data.complaints_closed_canonical}</span>
+                                </div>
+                            </div>
+                            
+                            {!validationResult.valid && (
+                                <div className="validation-actions">
+                                    <button type="button" className="btn-secondary" onClick={cancelAndRestart}>
+                                        Go Back
+                                    </button>
+                                    <button type="button" className="btn-warning" onClick={proceedWithWarnings}>
+                                        Proceed Anyway
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* Footer Actions */}
                     <div className="form-actions">
                         {onCancel && (
-                            <button type="button" className="btn-secondary" onClick={onCancel} disabled={isSubmitting}>
+                            <button type="button" className="btn-secondary" onClick={onCancel} disabled={isSubmitting || isValidating}>
                                 Cancel
                             </button>
                         )}
-                        <button type="submit" className="btn-primary" disabled={isSubmitting}>
-                            {isSubmitting ? 'Initializing Swarm...' : 'Launch Agents'}
+                        <button type="submit" className="btn-primary" disabled={isSubmitting || isValidating || Boolean(validationResult && !validationResult.valid)}>
+                            {isValidating ? 'Validating Data...' : isSubmitting ? 'Initializing Swarm...' : 'Launch Agents'}
                         </button>
                     </div>
                 </div>

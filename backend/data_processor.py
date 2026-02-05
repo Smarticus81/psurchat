@@ -69,13 +69,45 @@ class DataProcessor:
     def _analyze_dataframe(df: pd.DataFrame, file_type: str) -> Dict[str, Any]:
         """Generate statistical summary of dataframe"""
         summary = ""
-        metadata = {}
+        metadata = {
+            "columns_detected": {},
+            "all_columns": list(df.columns),
+            "record_count": len(df),
+        }
         
         try:
             # Basic info
             summary += f"### ANALYSIS OF {file_type.upper()} DATA\n"
             summary += f"Total Records: {len(df)}\n"
             summary += f"Columns: {', '.join(df.columns)}\n\n"
+            
+            # Detect key columns based on file type and add to summary
+            summary += "**Column Detection Results:**\n"
+            if file_type == "sales":
+                units_col = next((c for c in df.columns if any(x in c.lower() for x in ['units', 'quantity', 'qty', 'sold', 'distributed', 'shipped', 'volume', 'amount', 'count'])), None)
+                year_col = next((c for c in df.columns if any(x in c.lower() for x in ['year', 'date', 'period', 'fiscal'])), None)
+                metadata["columns_detected"]["units"] = units_col
+                metadata["columns_detected"]["year"] = year_col
+                summary += f"- Units Column: {units_col or 'NOT DETECTED - check column names'}\n"
+                summary += f"- Year/Date Column: {year_col or 'NOT DETECTED'}\n"
+            elif file_type == "complaints":
+                severity_col = next((c for c in df.columns if any(x in c.lower() for x in ['severity', 'priority', 'level', 'criticality', 'grade', 'impact', 'harm', 'classification'])), None)
+                closure_col = next((c for c in df.columns if any(x in c.lower() for x in ['closed', 'closure', 'status', 'investigation', 'state', 'resolved', 'outcome', 'disposition'])), None)
+                type_col = next((c for c in df.columns if any(x in c.lower() for x in ['type', 'category', 'classification', 'kind'])), None)
+                root_cause_col = next((c for c in df.columns if any(x in c.lower() for x in ['root', 'cause', 'determination', 'finding', 'reason', 'failure'])), None)
+                metadata["columns_detected"]["severity"] = severity_col
+                metadata["columns_detected"]["closure"] = closure_col
+                metadata["columns_detected"]["type"] = type_col
+                metadata["columns_detected"]["root_cause"] = root_cause_col
+                summary += f"- Severity Column: {severity_col or 'NOT DETECTED - check column names'}\n"
+                summary += f"- Closure/Status Column: {closure_col or 'NOT DETECTED'}\n"
+                summary += f"- Type/Category Column: {type_col or 'NOT DETECTED'}\n"
+                summary += f"- Root Cause Column: {root_cause_col or 'NOT DETECTED'}\n"
+            elif file_type in ("vigilance", "maude"):
+                type_col = next((c for c in df.columns if any(x in c.lower() for x in ['type', 'category', 'outcome', 'event', 'incident', 'harm'])), None)
+                metadata["columns_detected"]["type"] = type_col
+                summary += f"- Event Type Column: {type_col or 'NOT DETECTED'}\n"
+            summary += "\n"
             
             # 1. Metadata Detection (Deep Scan)
             metadata['udi_di'] = "Pending Extraction"
@@ -198,6 +230,46 @@ class MasterContextExtractor:
     DEFAULT_INFERENCE_POLICY = "strictly_factual"
     DEFAULT_DENOMINATOR_SCOPE = "reporting_period_only"
 
+    # Comprehensive column keyword lists for robust detection
+    UNITS_KEYWORDS = [
+        'units', 'quantity', 'qty', 'sold', 'distributed', 'shipped',
+        'volume', 'amount', 'count', 'total', 'devices', 'pieces',
+        'inventory', 'stock', 'dispatched', 'delivered', 'sales_qty',
+        'unit_count', 'num_units', 'number'
+    ]
+
+    YEAR_KEYWORDS = [
+        'year', 'date', 'period', 'fiscal', 'quarter', 'month',
+        'time', 'calendar', 'reporting', 'ship_date', 'sale_date',
+        'transaction_date', 'order_date'
+    ]
+
+    SEVERITY_KEYWORDS = [
+        'severity', 'priority', 'level', 'criticality', 'grade',
+        'impact', 'harm', 'seriousness', 'classification', 'risk_level',
+        'risk', 'class', 'category', 'importance', 'urgency', 'tier'
+    ]
+
+    CLOSURE_KEYWORDS = [
+        'closed', 'closure', 'status', 'investigation', 'state',
+        'resolved', 'complete', 'outcome', 'disposition', 'final',
+        'investigation_status', 'case_status', 'resolution', 'result'
+    ]
+
+    ROOT_CAUSE_KEYWORDS = [
+        'root', 'cause', 'determination', 'finding', 'reason',
+        'root_cause', 'failure', 'failure_mode', 'defect', 'issue',
+        'problem', 'analysis', 'conclusion', 'attribution'
+    ]
+
+    TYPE_KEYWORDS = [
+        'type', 'category', 'classification', 'complaint_type',
+        'issue_type', 'event_type', 'incident_type', 'kind'
+    ]
+
+    # Patterns for matching closed status values
+    CLOSED_PATTERNS = r'closed|complete|resolved|done|finalized|investigated|concluded|finished|verified|confirmed'
+
     @staticmethod
     def extract(
         data_files: List[Any],
@@ -226,6 +298,14 @@ class MasterContextExtractor:
         has_complaints = False
         has_vigilance = False
         has_risk_rmf = False
+
+        # Column mapping tracking for diagnostics
+        column_mapping: Dict[str, Any] = {
+            "sales": {"units_column": None, "year_column": None, "all_columns": []},
+            "complaints": {"severity_column": None, "closure_column": None, "type_column": None, "root_cause_column": None, "all_columns": []},
+            "vigilance": {"type_column": None, "all_columns": []},
+        }
+        parsing_warnings: List[str] = []
 
         for data_file in data_files:
             file_type = getattr(data_file, "file_type", None) or ""
@@ -260,19 +340,27 @@ class MasterContextExtractor:
 
             if file_type == "sales":
                 has_sales = True
+                column_mapping["sales"]["all_columns"] = list(df.columns)
                 units_col = None
                 year_col = None
                 for c in df.columns:
                     cl = str(c).lower()
-                    if any(x in cl for x in ["units", "quantity", "sold", "distributed", "qty"]):
+                    if units_col is None and any(x in cl for x in MasterContextExtractor.UNITS_KEYWORDS):
                         units_col = c
-                    if any(x in cl for x in ["year", "date", "period"]):
+                    if year_col is None and any(x in cl for x in MasterContextExtractor.YEAR_KEYWORDS):
                         year_col = c
+                # Fallback: use first numeric column if no units column found
                 if units_col is None:
                     for c in df.columns:
                         if pd.api.types.is_numeric_dtype(df[c]):
                             units_col = c
+                            parsing_warnings.append(f"Sales: No units column found by keyword; using first numeric column '{c}'")
                             break
+                # Track mapping
+                column_mapping["sales"]["units_column"] = units_col
+                column_mapping["sales"]["year_column"] = year_col
+                if units_col is None:
+                    parsing_warnings.append(f"Sales ({filename}): Could not detect units/quantity column. Available columns: {list(df.columns)}")
                 if units_col is not None:
                     total_sum = _safe_int(df[units_col].sum())
                     cumulative_units += total_sum
@@ -302,19 +390,57 @@ class MasterContextExtractor:
                         reporting_period_units = total_sum
             elif file_type == "complaints":
                 has_complaints = True
+                column_mapping["complaints"]["all_columns"] = list(df.columns)
                 total_complaints += len(df)
+                
+                # Look for closure column
                 for c in df.columns:
                     cl = str(c).lower()
-                    if any(x in cl for x in ["closed", "closure", "status", "investigation"]):
+                    if any(x in cl for x in MasterContextExtractor.CLOSURE_KEYWORDS):
                         closure_col_found = True
+                        column_mapping["complaints"]["closure_column"] = c
                         try:
                             closed_vals = df[c].astype(str).str.lower()
-                            complaints_closed_canonical = int((closed_vals.str.contains("closed|complete|resolved", case=False, na=False)).sum())
+                            complaints_closed_canonical = int((closed_vals.str.contains(MasterContextExtractor.CLOSED_PATTERNS, case=False, na=False)).sum())
                         except Exception:
                             pass
                         break
+                
+                # Look for severity column
+                for c in df.columns:
+                    cl = str(c).lower()
+                    if any(x in cl for x in MasterContextExtractor.SEVERITY_KEYWORDS):
+                        column_mapping["complaints"]["severity_column"] = c
+                        break
+                
+                # Look for type column
+                for c in df.columns:
+                    cl = str(c).lower()
+                    if any(x in cl for x in MasterContextExtractor.TYPE_KEYWORDS):
+                        column_mapping["complaints"]["type_column"] = c
+                        break
+                
+                # Look for root cause column
+                for c in df.columns:
+                    cl = str(c).lower()
+                    if any(x in cl for x in MasterContextExtractor.ROOT_CAUSE_KEYWORDS):
+                        column_mapping["complaints"]["root_cause_column"] = c
+                        break
+                
+                # Add warnings for missing columns
+                if not column_mapping["complaints"]["closure_column"]:
+                    parsing_warnings.append(f"Complaints ({filename}): No closure/status column detected. Available columns: {list(df.columns)}")
+                if not column_mapping["complaints"]["severity_column"]:
+                    parsing_warnings.append(f"Complaints ({filename}): No severity column detected. Available columns: {list(df.columns)}")
             elif file_type in ("vigilance", "maude"):
                 has_vigilance = True
+                column_mapping["vigilance"]["all_columns"] = list(df.columns)
+                # Look for type column
+                for c in df.columns:
+                    cl = str(c).lower()
+                    if any(x in cl for x in MasterContextExtractor.TYPE_KEYWORDS + ['outcome', 'event', 'incident', 'harm']):
+                        column_mapping["vigilance"]["type_column"] = c
+                        break
             elif file_type in ("risk", "rmf", "risk_rmf"):
                 has_risk_rmf = True
 
@@ -357,4 +483,7 @@ class MasterContextExtractor:
             "has_complaints": has_complaints,
             "has_vigilance": has_vigilance,
             "has_risk_rmf": has_risk_rmf,
+            # Column mapping diagnostics
+            "column_mapping": column_mapping,
+            "parsing_warnings": parsing_warnings,
         }

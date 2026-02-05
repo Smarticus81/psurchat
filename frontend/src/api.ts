@@ -106,6 +106,11 @@ export const api = {
         return response.data;
     },
 
+    async validateSession(sessionId: number) {
+        const response = await axios.get(`${API_BASE_URL}/sessions/${sessionId}/validate`);
+        return response.data;
+    },
+
     async startGeneration(sessionId: number) {
         const response = await axios.post(`${API_BASE_URL}/sessions/${sessionId}/start`);
         return response.data;
@@ -151,6 +156,35 @@ export const api = {
     // Workflow
     async getWorkflow(sessionId: number) {
         const response = await axios.get(`${API_BASE_URL}/sessions/${sessionId}/workflow`);
+        return response.data;
+    },
+
+    // Interactive Workflow Control
+    async pauseWorkflow(sessionId: number) {
+        const response = await axios.post(`${API_BASE_URL}/sessions/${sessionId}/pause`);
+        return response.data;
+    },
+
+    async resumeWorkflow(sessionId: number) {
+        const response = await axios.post(`${API_BASE_URL}/sessions/${sessionId}/resume`);
+        return response.data;
+    },
+
+    async askAgent(sessionId: number, agent: string, question: string) {
+        const response = await axios.post(`${API_BASE_URL}/sessions/${sessionId}/ask`, {
+            agent,
+            question
+        });
+        return response.data;
+    },
+
+    async getWorkflowStatus(sessionId: number) {
+        const response = await axios.get(`${API_BASE_URL}/sessions/${sessionId}/workflow-status`);
+        return response.data;
+    },
+
+    async getAvailableAgents() {
+        const response = await axios.get(`${API_BASE_URL}/agents`);
         return response.data;
     }
 };

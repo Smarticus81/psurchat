@@ -68,8 +68,13 @@ class ChatMessage(Base):
     # Metadata for tool calls, data refs, etc.
     message_metadata = Column(JSON, nullable=True)
     
+    # Interactive message tracking
+    processed = Column(Boolean, default=False)  # Whether agent has handled this message
+    response_to_id = Column(Integer, ForeignKey("chat_messages.id"), nullable=True)  # Links response to original
+    
     # Relationships
     session = relationship("PSURSession", back_populates="messages")
+    response_to = relationship("ChatMessage", remote_side=[id], backref="responses")
 
 
 class SectionDocument(Base):
@@ -106,8 +111,13 @@ class WorkflowState(Base):
     current_section = Column(String(10), nullable=True)
     sections_completed = Column(Integer, default=0)
     total_sections = Column(Integer, default=13)
-    status = Column(String(50), default="initialized")  # initialized, running, complete, error
+    status = Column(String(50), default="initialized")  # initialized, running, paused, waiting_user, complete, error
     summary = Column(Text, nullable=True)
+    
+    # Interactive workflow state
+    paused = Column(Boolean, default=False)
+    pending_user_response = Column(Integer, nullable=True)  # Message ID awaiting response
+    current_agent = Column(String(50), nullable=True)  # Agent currently working
     
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
