@@ -1,23 +1,10 @@
 import { useEffect, useState } from 'react';
 import { FileText, Download, Eye, Plus, Calendar, Clock, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import { api } from '../api';
+import { api, Session } from '../api';
 import './SessionList.css';
 
-interface Session {
-    id: number;
-    device_name: string;
-    udi_di: string;
-    status: string;
-    period_start: string;
-    period_end: string;
-    created_at: string;
-    updated_at: string;
-    workflow?: {
-        sections_completed: number;
-        total_sections: number;
-    };
-}
+const API_ROOT = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 interface SessionListProps {
     onSessionSelected: (sessionId: number) => void;
@@ -50,7 +37,7 @@ export const SessionList: React.FC<SessionListProps> = ({ onSessionSelected, onN
         if (confirm('Are you sure you want to delete this session? This cannot be undone.')) {
             try {
                 await api.deleteSession(sessionId);
-                loadSessions(); // Refresh list
+                loadSessions();
             } catch (error) {
                 console.error('Failed to delete session:', error);
                 alert('Failed to delete session');
@@ -60,15 +47,12 @@ export const SessionList: React.FC<SessionListProps> = ({ onSessionSelected, onN
 
     const getStatusColor = (status: string) => {
         switch (status) {
-            case 'complete': return '#10b981';
-            case 'running': return '#3b82f6';
-            case 'error': return '#ef4444';
-            default: return '#6b7280';
+            case 'complete': return 'var(--neo-green)';
+            case 'running': return 'var(--neo-cyan)';
+            case 'error': return 'var(--neo-red)';
+            case 'initializing': return 'var(--neo-yellow)';
+            default: return 'var(--neo-text-muted)';
         }
-    };
-
-    const getStatusIcon = (status: string) => {
-        return status === 'complete' ? '✅' : status === 'running' ? '🔄' : '⏸️';
     };
 
     if (loading) {
@@ -83,7 +67,7 @@ export const SessionList: React.FC<SessionListProps> = ({ onSessionSelected, onN
         <div className="session-list-container">
             <div className="session-list-header">
                 <div>
-                    <h1>📊 PSUR Sessions</h1>
+                    <h1>PSUR Sessions</h1>
                     <p>View and manage your Periodic Safety Update Reports</p>
                 </div>
                 <button className="btn-new-session" onClick={onNewSession}>
@@ -110,11 +94,12 @@ export const SessionList: React.FC<SessionListProps> = ({ onSessionSelected, onN
                                 <div className="session-icon">
                                     <FileText size={24} />
                                 </div>
-                                <div
-                                    className="session-status"
-                                    style={{ background: getStatusColor(session.status) }}
-                                >
-                                    {getStatusIcon(session.status)} {session.status}
+                                <div className="session-status-row">
+                                    <span
+                                        className="status-dot"
+                                        style={{ background: getStatusColor(session.status) }}
+                                    />
+                                    <span className="status-text">{session.status}</span>
                                 </div>
                             </div>
 
@@ -125,7 +110,7 @@ export const SessionList: React.FC<SessionListProps> = ({ onSessionSelected, onN
                                 <div className="session-meta">
                                     <div className="meta-item">
                                         <Calendar size={14} />
-                                        <span>{new Date(session.period_start).toLocaleDateString()} - {new Date(session.period_end).toLocaleDateString()}</span>
+                                        <span>{new Date(session.period_start).toLocaleDateString()} &ndash; {new Date(session.period_end).toLocaleDateString()}</span>
                                     </div>
                                     <div className="meta-item">
                                         <Clock size={14} />
@@ -159,7 +144,7 @@ export const SessionList: React.FC<SessionListProps> = ({ onSessionSelected, onN
 
                                 {session.status === 'complete' && (
                                     <a
-                                        href={`http://localhost:8000/api/sessions/${session.id}/document/download`}
+                                        href={`${API_ROOT}/api/sessions/${session.id}/document/download`}
                                         download
                                         className="btn-download"
                                         title="Download PSUR"

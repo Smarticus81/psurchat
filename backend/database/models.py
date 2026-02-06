@@ -21,10 +21,12 @@ class PSURSession(Base):
     period_start = Column(DateTime, nullable=False)
     period_end = Column(DateTime, nullable=False)
     
+    template_id = Column(String(50), default="eu_uk_mdr")
     status = Column(String(50), default="initializing")
     created_at = Column(DateTime, default=datetime.utcnow)
     master_context = Column(JSON, nullable=True)
     master_context_intake = Column(JSON, nullable=True)
+    context_snapshot = Column(Text, nullable=True)  # JSON snapshot of PSURContext for DOCX download
     
     # Relationships
     agents = relationship("Agent", back_populates="session", cascade="all, delete-orphan")
@@ -139,3 +141,20 @@ class DataFile(Base):
     
     # Relationships
     session = relationship("PSURSession", back_populates="data_files")
+
+
+class ChartAsset(Base):
+    """Stores generated chart images for PSUR reports"""
+    __tablename__ = "chart_assets"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("psur_sessions.id"), nullable=False)
+    chart_id = Column(String(100), nullable=False)  # e.g., table1_units_year
+    title = Column(String(255), nullable=False)
+    category = Column(String(50), nullable=False)  # annex_ii, trend, distribution
+    section_id = Column(String(10), nullable=True)  # which PSUR section this chart belongs to
+    png_data = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    session = relationship("PSURSession")

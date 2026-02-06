@@ -125,166 +125,128 @@ class AgentConfig:
         return get_fallback_provider(self.ai_provider)
 
 
-# SOTA Agent configurations - Aligned with MDCG 2022-21 and FormQAR-054
-# Each agent has specific expertise and section responsibility
-# All agents use reasoning models for higher quality output
+# =============================================================================
+# Discussion Panel Architecture: 18-Agent AGENT_CONFIGS
+# =============================================================================
+# Orchestrator (1) + Section Agents (13) + Analytical Support (3) + QC (1)
+
 AGENT_CONFIGS = {
-    # Orchestrator - Workflow coordination
+    # === ORCHESTRATOR ===
     "Alex": AgentConfig(
-        name="Alex",
-        role="Orchestrator",
-        ai_provider="anthropic",
-        model=settings.anthropic_model_default,
-        temperature=0.5,
-        max_tokens=8000,
+        name="Alex", role="Orchestrator",
+        ai_provider="anthropic", model="claude-sonnet-4-5-20250514",
+        temperature=0.5, max_tokens=2000,
     ),
 
-    # Section A - Executive Summary (synthesizes all findings)
-    "Marcus": AgentConfig(
-        name="Marcus",
-        role="Executive Summary Specialist",
-        ai_provider="anthropic",
-        model=settings.anthropic_model_default,
-        temperature=0.6,
-        max_tokens=16000,
-    ),
+    # === SECTION AGENTS (13) ===
+    # max_tokens STRICTLY capped: 800 words ~= 1100 tokens, with buffer.
+    # Total PSUR target: ~30 pages across 13 sections.
 
-    # Section B, C - Scope & Sales Data
-    "Greta": AgentConfig(
-        name="Greta",
-        role="Sales & Market Data Analyst",
-        ai_provider="openai",
-        model=settings.openai_model_default,
-        temperature=0.5,
-        max_tokens=8000,
-    ),
-
-    # Section D - Serious Incidents & Vigilance
-    "David": AgentConfig(
-        name="David",
-        role="Vigilance Specialist",
-        ai_provider="anthropic",
-        model=settings.anthropic_model_default,
-        temperature=0.4,
-        max_tokens=8000,
-    ),
-
-    # Sections E, F - Customer Feedback & Complaints Management
-    "Emma": AgentConfig(
-        name="Emma",
-        role="Complaint Classifier",
-        ai_provider="openai",
-        model=settings.openai_model_default,
-        temperature=0.5,
-        max_tokens=8000,
-    ),
-
-    # Section G - Trends & Statistical Analysis
+    # Section A: Executive Summary (written last)
     "Diana": AgentConfig(
-        name="Diana",
-        role="Trend Detective",
-        ai_provider="anthropic",
-        model=settings.anthropic_model_default,
-        temperature=0.4,
-        max_tokens=8000,
+        name="Diana", role="Device Identification Specialist",
+        ai_provider="openai", model=settings.openai_model_default,
+        temperature=0.4, max_tokens=2000,
+    ),
+    # Section B: Scope & Documents
+    "Sam": AgentConfig(
+        name="Sam", role="Scope & Documentation Curator",
+        ai_provider="google", model=settings.google_model_default,
+        temperature=0.5, max_tokens=1500,
+    ),
+    # Section C: Sales & Distribution
+    "Raj": AgentConfig(
+        name="Raj", role="Sales Analyst",
+        ai_provider="anthropic", model="claude-haiku-4-5-20250514",
+        temperature=0.4, max_tokens=1500,
+    ),
+    # Section D: Vigilance / Serious Incidents
+    "Vera": AgentConfig(
+        name="Vera", role="Vigilance Monitor",
+        ai_provider="openai", model=settings.openai_model_default,
+        temperature=0.3, max_tokens=2000,
+    ),
+    # Sections E+F: Complaints
+    "Carla": AgentConfig(
+        name="Carla", role="Complaint Classifier",
+        ai_provider="google", model=settings.google_model_default,
+        temperature=0.5, max_tokens=2500,
+    ),
+    # Section G: Trends
+    "Tara": AgentConfig(
+        name="Tara", role="Trend Detective",
+        ai_provider="anthropic", model=settings.anthropic_model_default,
+        temperature=0.4, max_tokens=2000,
+    ),
+    # Section H: FSCA
+    "Frank": AgentConfig(
+        name="Frank", role="FSCA Coordinator",
+        ai_provider="openai", model=settings.openai_model_default,
+        temperature=0.5, max_tokens=1500,
+    ),
+    # Section I: CAPA
+    "Cameron": AgentConfig(
+        name="Cameron", role="CAPA Effectiveness Verifier",
+        ai_provider="google", model=settings.google_model_default,
+        temperature=0.5, max_tokens=1500,
+    ),
+    # Risk Tables
+    "Rita": AgentConfig(
+        name="Rita", role="Risk Reassessment Specialist",
+        ai_provider="anthropic", model="claude-sonnet-4-5-20250514",
+        temperature=0.4, max_tokens=1500,
+    ),
+    # Section J: Benefit-Risk
+    "Brianna": AgentConfig(
+        name="Brianna", role="Benefit-Risk Evaluator",
+        ai_provider="openai", model=settings.openai_model_default,
+        temperature=0.5, max_tokens=2000,
+    ),
+    # Section K: External Databases
+    "Eddie": AgentConfig(
+        name="Eddie", role="External Database Investigator",
+        ai_provider="google", model=settings.google_model_default,
+        temperature=0.6, max_tokens=1500,
+    ),
+    # Section L: PMCF
+    "Clara": AgentConfig(
+        name="Clara", role="Clinical Follow-Up Specialist",
+        ai_provider="google", model=settings.google_model_default,
+        temperature=0.5, max_tokens=1500,
+    ),
+    # Section M: Conclusions
+    "Marcus": AgentConfig(
+        name="Marcus", role="Synthesis & Conclusions Expert",
+        ai_provider="anthropic", model=settings.anthropic_model_default,
+        temperature=0.6, max_tokens=3000,
     ),
 
-    # Section H - Field Safety Corrective Actions
-    "Lisa": AgentConfig(
-        name="Lisa",
-        role="FSCA Coordinator",
-        ai_provider="google",
-        model=settings.google_model_default,
-        temperature=0.5,
-        max_tokens=8000,
+    # === ANALYTICAL SUPPORT AGENTS (3) ===
+
+    "Statler": AgentConfig(
+        name="Statler", role="Statistical Calculator",
+        ai_provider="openai", model=settings.openai_model_default,
+        temperature=0.1, max_tokens=2000,
+    ),
+    "Charley": AgentConfig(
+        name="Charley", role="Chart & Table Generator",
+        ai_provider="google", model=settings.google_model_default,
+        temperature=0.3, max_tokens=2000,
+    ),
+    "Quincy": AgentConfig(
+        name="Quincy", role="Data Quality Auditor",
+        ai_provider="openai", model=settings.openai_model_default,
+        temperature=0.2, max_tokens=2000,
     ),
 
-    # Section I - CAPA Implementation
-    "Tom": AgentConfig(
-        name="Tom",
-        role="CAPA Verifier",
-        ai_provider="openai",
-        model=settings.openai_model_default,
-        temperature=0.5,
-        max_tokens=8000,
-    ),
+    # === QUALITY CONTROL ===
 
-    # Sections J, K - Literature & External Databases
-    "James": AgentConfig(
-        name="James",
-        role="Literature Reviewer",
-        ai_provider="google",
-        model=settings.google_model_default,
-        temperature=0.6,
-        max_tokens=8000,
-    ),
-
-    # Section L - PMCF Activities
-    "Sarah": AgentConfig(
-        name="Sarah",
-        role="PMCF Specialist",
-        ai_provider="google",
-        model=settings.google_model_default,
-        temperature=0.5,
-        max_tokens=8000,
-    ),
-
-    # Section M - Benefit-Risk & Conclusions
-    "Robert": AgentConfig(
-        name="Robert",
-        role="Risk Specialist",
-        ai_provider="anthropic",
-        model=settings.anthropic_model_default,
-        temperature=0.4,
-        max_tokens=16000,
-    ),
-
-    # QC Validator - Reviews all sections
     "Victoria": AgentConfig(
-        name="Victoria",
-        role="QC Expert",
-        ai_provider="openai",
-        model=settings.openai_model_default,
-        temperature=0.3,
-        max_tokens=8000,
+        name="Victoria", role="QC Validator",
+        ai_provider="openai", model=settings.openai_model_default,
+        temperature=0.3, max_tokens=2000,
     ),
 }
-
-
-# SOTA Section mapping - Aligned with FormQAR-054 and MDCG 2022-21
-# Workflow order is based on dependency hierarchy
-SECTIONS = {
-    "A": {"title": "Executive Summary", "agent": "Marcus", "number": 1, "mdcg_ref": "1.1"},
-    "B": {"title": "Scope and Device Description", "agent": "Greta", "number": 2, "mdcg_ref": "1.2"},
-    "C": {"title": "Post-Market Data: Units Distributed", "agent": "Greta", "number": 3, "mdcg_ref": "2.1"},
-    "D": {"title": "Serious Incidents and Trends", "agent": "David", "number": 4, "mdcg_ref": "2.2"},
-    "E": {"title": "Post-Market Surveillance: Customer Feedback", "agent": "Emma", "number": 5, "mdcg_ref": "2.3"},
-    "F": {"title": "Complaints Management", "agent": "Emma", "number": 6, "mdcg_ref": "2.4"},
-    "G": {"title": "Trends and Performance Analysis", "agent": "Diana", "number": 7, "mdcg_ref": "3"},
-    "H": {"title": "Field Safety Corrective Actions (FSCA)", "agent": "Lisa", "number": 8, "mdcg_ref": "2.5"},
-    "I": {"title": "Corrective and Preventive Actions (CAPA)", "agent": "Tom", "number": 9, "mdcg_ref": "1.4"},
-    "J": {"title": "Literature Review and External Data", "agent": "James", "number": 10, "mdcg_ref": "1.3"},
-    "K": {"title": "External Adverse Event Databases", "agent": "James", "number": 11, "mdcg_ref": "2.6"},
-    "L": {"title": "Post-Market Clinical Follow-up (PMCF)", "agent": "Sarah", "number": 12, "mdcg_ref": "1.5"},
-    "M": {"title": "Overall Findings and Conclusions", "agent": "Robert", "number": 13, "mdcg_ref": "1.6"},
-}
-
-# Workflow generation order (dependency-based per SOTA spec)
-WORKFLOW_ORDER = [
-    "C",   # Phase 1: DATA FOUNDATION - Sales/Exposure (Greta)
-    "D",   # Phase 2: ADVERSE EVENT ANALYSIS - Serious Incidents (David)
-    "E",   # Phase 2: Customer Feedback (Emma)
-    "F",   # Phase 2: Complaints Management (Emma)
-    "G",   # Phase 3: ANALYTICAL - Trends & Analysis (Diana)
-    "H",   # Phase 3: FSCA (Lisa)
-    "I",   # Phase 3: CAPA (Tom)
-    "J",   # Phase 4: EXTERNAL CONTEXT - Literature Review (James)
-    "K",   # Phase 4: External Databases (James)
-    "L",   # Phase 5: CLINICAL EVIDENCE - PMCF (Sarah)
-    "B",   # Phase 6: CHARACTERIZATION - Scope & Description (Greta)
-    "M",   # Phase 7: SYNTHESIS - Findings & Conclusions (Robert)
-    "A",   # Phase 7: Executive Summary (Marcus)
-]
 
 
 def get_ai_client(provider: str):

@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 venv/
+.venv/
 env/
 ENV/
 *.egg-info/
@@ -14,6 +15,7 @@ build/
 # Environment
 .env
 .env.local
+backend/.env
 
 # Database
 *.db

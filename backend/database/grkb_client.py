@@ -27,11 +27,8 @@ class GRKBClient:
     _instance: Optional["GRKBClient"] = None
     
     def __init__(self):
-        # Parse DATABASE_URL for GRKB (Supabase PostgreSQL)
-        self.database_url = os.getenv(
-            "DATABASE_URL",
-            "postgresql://postgres.tdbvnakvmztquhfjvupw:7Innerleithen!@aws-0-us-west-2.pooler.supabase.com:5432/postgres"
-        )
+        # Parse DATABASE_URL for GRKB (Supabase PostgreSQL) -- must be set in .env
+        self.database_url = os.getenv("DATABASE_URL", "")
         self._conn = None
         
     @classmethod

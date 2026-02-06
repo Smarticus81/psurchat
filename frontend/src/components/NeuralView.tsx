@@ -3,52 +3,83 @@ import ForceGraph2D from 'react-force-graph-2d';
 import { api, ChatMessage, SectionDoc, Agent } from '../api';
 import { 
     Activity, CheckCircle, Clock, X, Network, 
-    GitBranch, BarChart3, Zap, MessageSquare, Users
+    GitBranch, BarChart3, Zap, MessageSquare, Users, PieChart
 } from 'lucide-react';
+import { ChartPanel } from './ChartPanel';
 import './NeuralView.css';
 
 interface NeuralViewProps {
     sessionId: number;
 }
 
-// SOTA Mapping: Sections to Agents
+// 18-Agent Discussion Panel Architecture: Section-to-Agent mapping
 const AGENT_MAP: Record<string, string> = {
-    'A': 'Marcus', 'B': 'Greta', 'C': 'Greta', 'D': 'David',
-    'E': 'Emma', 'F': 'Emma', 'G': 'Diana', 'H': 'Lisa',
-    'I': 'Tom', 'J': 'James', 'K': 'James', 'L': 'Sarah', 'M': 'Robert'
+    'A': 'Diana', 'B': 'Sam', 'C': 'Raj', 'D': 'Vera',
+    'E': 'Carla', 'F': 'Carla', 'G': 'Tara', 'H': 'Frank',
+    'I': 'Cameron', 'J': 'Brianna', 'K': 'Eddie', 'L': 'Clara', 'M': 'Marcus'
 };
 
-// Section names for display
 const SECTION_NAMES: Record<string, string> = {
     'A': 'Executive Summary', 'B': 'Scope & Device', 'C': 'Units Distributed',
     'D': 'Serious Incidents', 'E': 'Customer Feedback', 'F': 'Complaints',
     'G': 'Trends Analysis', 'H': 'FSCA', 'I': 'CAPA',
-    'J': 'Literature Review', 'K': 'External Databases', 'L': 'PMCF', 'M': 'Conclusions'
+    'J': 'Benefit-Risk', 'K': 'External Databases', 'L': 'PMCF', 'M': 'Conclusions'
 };
 
-// Agent Roles
+// 18-Agent Roles (1 orchestrator + 13 section + 3 analytical + 1 QC)
 const AGENT_ROLES: Record<string, string> = {
-    'Alex': 'Orchestrator', 'Marcus': 'Executive Summary', 'Greta': 'Sales & Market Data',
-    'David': 'Vigilance Specialist', 'Emma': 'Complaint Classifier', 'Diana': 'Trend Detective',
-    'Lisa': 'FSCA Coordinator', 'Tom': 'CAPA Verifier', 'James': 'Literature Reviewer',
-    'Sarah': 'PMCF Specialist', 'Robert': 'Risk Specialist', 'Victoria': 'QC Expert',
-    'Data Core': 'System Data'
+    // Orchestrator
+    'Alex': 'Orchestrator',
+    // Section Agents
+    'Diana': 'Device Identification',
+    'Sam': 'Scope & Documentation',
+    'Raj': 'Sales Analyst',
+    'Vera': 'Vigilance Monitor',
+    'Carla': 'Complaint Classifier',
+    'Tara': 'Trend Detective',
+    'Frank': 'FSCA Coordinator',
+    'Cameron': 'CAPA Verifier',
+    'Rita': 'Risk Specialist',
+    'Brianna': 'Benefit-Risk Evaluator',
+    'Eddie': 'External DB Investigator',
+    'Clara': 'PMCF Specialist',
+    'Marcus': 'Synthesis & Conclusions',
+    // Analytical Support
+    'Statler': 'Statistical Calculator',
+    'Charley': 'Chart Generator',
+    'Quincy': 'Data Quality Auditor',
+    // QC
+    'Victoria': 'QC Validator',
 };
 
-// Colors
+// Agent category mapping for graph layout
+const AGENT_CATEGORY: Record<string, string> = {
+    'Alex': 'orchestrator',
+    'Diana': 'section', 'Sam': 'section', 'Raj': 'section', 'Vera': 'section',
+    'Carla': 'section', 'Tara': 'section', 'Frank': 'section', 'Cameron': 'section',
+    'Rita': 'section', 'Brianna': 'section', 'Eddie': 'section', 'Clara': 'section',
+    'Marcus': 'section',
+    'Statler': 'analytical', 'Charley': 'analytical', 'Quincy': 'analytical',
+    'Victoria': 'qc',
+};
+
 const COLORS = {
-    ORCHESTRATOR: '#57C7E3', SYSTEM: '#8DCC93', WRITER: '#F79767',
-    QC: '#F16667', SYNTHESIS: '#FFE081', BG: '#0B0D11',
+    ORCHESTRATOR: '#6366f1', SYSTEM: '#8DCC93', SECTION: '#F79767',
+    QC: '#FFC454', ANALYTICAL: '#3498db', SYNTHESIS: '#e67e22', BG: '#0B0D11',
 };
 
 const AGENT_COLORS: Record<string, string> = {
-    'Alex': '#57C7E3', 'Victoria': '#F16667', 'Marcus': '#FFE081', 'Robert': '#FFE081',
-    'Greta': '#F79767', 'David': '#F79767', 'Emma': '#F79767', 'Diana': '#F79767',
-    'Lisa': '#F79767', 'Tom': '#F79767', 'James': '#F79767', 'Sarah': '#F79767',
-    'User': '#9B8FE8', 'System': '#8DCC93', 'Data Core': '#8DCC93'
+    'Alex': '#6366f1',
+    'Diana': '#FFE081', 'Sam': '#D9C8AE', 'Raj': '#F79767', 'Vera': '#F16667',
+    'Carla': '#DA7194', 'Tara': '#C990C0', 'Frank': '#8DCC93', 'Cameron': '#57C7E3',
+    'Rita': '#569480', 'Brianna': '#4C8EDA', 'Eddie': '#9b59b6', 'Clara': '#1abc9c',
+    'Marcus': '#e67e22',
+    'Statler': '#e74c3c', 'Charley': '#3498db', 'Quincy': '#2ecc71',
+    'Victoria': '#FFC454',
+    'User': '#9B8FE8', 'System': '#8DCC93',
 };
 
-type TabType = 'graph' | 'timeline' | 'metrics';
+type TabType = 'graph' | 'timeline' | 'metrics' | 'charts';
 
 export const NeuralView: React.FC<NeuralViewProps> = ({ sessionId }) => {
     const [activeTab, setActiveTab] = useState<TabType>('graph');
@@ -113,8 +144,7 @@ export const NeuralView: React.FC<NeuralViewProps> = ({ sessionId }) => {
         const recentTime = Date.now() - 5000;
         messages.forEach(m => {
             if (new Date(m.timestamp).getTime() > recentTime) {
-                let from = m.from_agent;
-                if (from === 'System') from = 'Data Core';
+                const from = m.from_agent;
                 active.add(from);
                 if (m.to_agent && m.to_agent !== 'all') active.add(m.to_agent);
             }
@@ -148,6 +178,13 @@ export const NeuralView: React.FC<NeuralViewProps> = ({ sessionId }) => {
                     <BarChart3 size={14} />
                     <span>Metrics</span>
                 </button>
+                <button 
+                    className={`neural-tab ${activeTab === 'charts' ? 'neural-tab--active' : ''}`}
+                    onClick={() => setActiveTab('charts')}
+                >
+                    <PieChart size={14} />
+                    <span>Charts</span>
+                </button>
             </div>
             <div className="neural-content">
                 {activeTab === 'graph' && (
@@ -171,6 +208,9 @@ export const NeuralView: React.FC<NeuralViewProps> = ({ sessionId }) => {
                         agents={agents}
                         agentStatus={agentStatus}
                     />
+                )}
+                {activeTab === 'charts' && (
+                    <ChartPanel sessionId={sessionId} />
                 )}
             </div>
         </div>
@@ -205,29 +245,39 @@ const GraphPanel: React.FC<{
 
     const graphData = useMemo(() => {
         const nodes = Object.keys(AGENT_ROLES).map(id => {
+            const cat = AGENT_CATEGORY[id] || 'section';
             let group = 3;
-            let color = COLORS.WRITER;
+            let color = AGENT_COLORS[id] || COLORS.SECTION;
 
-            if (id === 'Alex') { group = 1; color = COLORS.ORCHESTRATOR; }
-            else if (id === 'Victoria') { group = 2; color = COLORS.QC; }
-            else if (id === 'Data Core') { group = 0; color = COLORS.SYSTEM; }
-            else if (id === 'Marcus' || id === 'Robert') { color = COLORS.SYNTHESIS; }
+            if (cat === 'orchestrator') { group = 1; color = COLORS.ORCHESTRATOR; }
+            else if (cat === 'qc') { group = 2; color = COLORS.QC; }
+            else if (cat === 'analytical') { group = 4; color = AGENT_COLORS[id] || COLORS.ANALYTICAL; }
+            else if (id === 'Marcus') { color = COLORS.SYNTHESIS; }
 
-            let val = 15;
-            if (id === 'Alex') val = 30;
-            if (id === 'Data Core') val = 20;
+            let val = 12;
+            if (id === 'Alex') val = 28;
+            else if (cat === 'analytical') val = 14;
+            else if (cat === 'qc') val = 16;
 
-            return { id, group, val, label: id, color, role: AGENT_ROLES[id] };
+            return { id, group, val, label: id, color, role: AGENT_ROLES[id], category: cat };
         });
 
         const links: any[] = [];
+        // Alex connects to all agents
         nodes.forEach(n => {
             if (n.id !== 'Alex') links.push({ source: 'Alex', target: n.id });
         });
-        nodes.filter(n => n.group === 3).forEach(n => {
-            links.push({ source: 'Data Core', target: n.id });
+        // Victoria connects to all section agents
+        nodes.filter(n => n.category === 'section').forEach(n => {
             links.push({ source: 'Victoria', target: n.id });
         });
+        // Analytical agents connect to each other (cluster)
+        const analyticalIds = nodes.filter(n => n.category === 'analytical').map(n => n.id);
+        for (let i = 0; i < analyticalIds.length; i++) {
+            for (let j = i + 1; j < analyticalIds.length; j++) {
+                links.push({ source: analyticalIds[i], target: analyticalIds[j] });
+            }
+        }
 
         return { nodes, links };
     }, []);
@@ -275,7 +325,12 @@ const GraphPanel: React.FC<{
                         const pulse = Math.sin(time / 200) * 3 + 3;
                         ctx.beginPath();
                         ctx.arc(node.x, node.y, r + pulse, 0, 2 * Math.PI, false);
-                        ctx.fillStyle = `rgba(${node.color === COLORS.ORCHESTRATOR ? '87, 199, 227' : '247, 151, 103'}, 0.2)`;
+                        const cat = AGENT_CATEGORY[node.id] || 'section';
+                        const pulseRgb = cat === 'orchestrator' ? '99, 102, 241'
+                            : cat === 'analytical' ? '52, 152, 219'
+                            : cat === 'qc' ? '255, 196, 84'
+                            : '247, 151, 103';
+                        ctx.fillStyle = `rgba(${pulseRgb}, 0.2)`;
                         ctx.fill();
                     }
 
@@ -362,7 +417,7 @@ const TimelinePanel: React.FC<{
         }> = [];
 
         // Add messages as events
-        messages.forEach((m, i) => {
+        messages.forEach((m) => {
             if (m.message_type === 'system') return;
             items.push({
                 id: `msg-${m.id}`,
@@ -435,7 +490,7 @@ const MetricsPanel: React.FC<{
     sections: SectionDoc[];
     agents: Agent[];
     agentStatus: Record<string, string>;
-}> = ({ messages, sections, agents, agentStatus }) => {
+}> = ({ messages, sections, agentStatus }) => {
     
     const stats = useMemo(() => {
         const completedSections = sections.filter(s => s.status === 'approved' || s.status === 'complete').length;

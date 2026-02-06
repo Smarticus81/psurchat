@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, X, FileText, Calendar, Server, ChevronDown, ChevronUp, AlertCircle, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Upload, X, FileText, Calendar, Server, ChevronDown, ChevronUp, AlertCircle, CheckCircle, AlertTriangle, Globe } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { api } from '../api';
 import './SessionSetup.css';
@@ -13,14 +13,18 @@ interface ValidationResult {
     valid: boolean;
     issues: ValidationIssue[];
     extracted_data: {
-        exposure_denominator_value: number;
-        total_complaints_canonical: number;
-        complaints_closed_canonical: number;
-        annual_units_canonical: Record<string, number>;
+        total_units_sold: number;
+        total_complaints: number;
+        complaints_closed_count: number;
+        complaints_with_root_cause_identified: number;
+        total_units_by_year: Record<string, number>;
+        total_complaints_by_year: Record<string, number>;
+        serious_incidents: number;
+        total_vigilance_events: number;
         has_sales: boolean;
         has_complaints: boolean;
         has_vigilance: boolean;
-        column_mapping: Record<string, unknown>;
+        column_mappings: Record<string, unknown>;
     };
 }
 
@@ -30,9 +34,11 @@ interface SessionSetupProps {
 }
 
 export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, onCancel }) => {
-    const [deviceName, setDeviceName] = useState('Endosee Hysteroscope');
-    const [startDate, setStartDate] = useState('2024-01-01');
-    const [endDate, setEndDate] = useState('2024-12-31');
+    const [templateId, setTemplateId] = useState<'eu_uk_mdr' | 'non_ce'>('eu_uk_mdr');
+    const [deviceName, setDeviceName] = useState('');
+    const currentYear = new Date().getFullYear();
+    const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
+    const [endDate, setEndDate] = useState(`${currentYear}-12-31`);
     const [files, setFiles] = useState<File[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showMasterContext, setShowMasterContext] = useState(false);
@@ -113,12 +119,13 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
         setValidationResult(null);
         
         try {
-            // 1. Create Session
+            // 1. Create Session with selected template
             const session = await api.createSession(
                 deviceName,
                 "Pending Extraction",
                 startDate,
-                endDate
+                endDate,
+                templateId
             );
 
             // 2. Upload Files with user-selected types
@@ -143,20 +150,25 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
                 // 404 or other: intake endpoint may be missing on older backend; continue
             }
 
-            // 4. Run validation before proceeding
+            // 4. Run validation before proceeding (skip if endpoint unavailable)
             setIsValidating(true);
-            const validation = await api.validateSession(session.session_id);
-            setValidationResult(validation);
-            setPendingSessionId(session.session_id);
-            setIsValidating(false);
-            
-            // If there are errors, stop and show results
-            if (!validation.valid) {
-                setIsSubmitting(false);
-                return;
+            try {
+                const validation = await api.validateSession(session.session_id);
+                setValidationResult(validation);
+                setPendingSessionId(session.session_id);
+                setIsValidating(false);
+                
+                // If there are errors, stop and show results
+                if (!validation.valid) {
+                    setIsSubmitting(false);
+                    return;
+                }
+            } catch {
+                // Validation endpoint not available -- skip and proceed
+                setIsValidating(false);
             }
             
-            // 5. No errors - proceed to generation
+            // 5. Proceed to generation
             onSessionCreated(session.session_id);
             api.startGeneration(session.session_id).catch((err) => {
                 console.error('Start generation failed:', err);
@@ -188,14 +200,49 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
     return (
         <div className="session-setup-card">
             <div className="setup-header">
-                <h2><Server size={20} style={{ display: 'inline', marginBottom: -3, marginRight: 8 }} /> New PSUR Session</h2>
-                <span style={{ fontSize: '0.8rem', color: '#666' }}>v2.5.0</span>
+                <h2><Server size={20} className="setup-header-icon" /> New PSUR Session</h2>
+            </div>
+
+            {/* Step indicators */}
+            <div className="setup-steps">
+                <div className="setup-step">
+                    <span className="step-number">1</span>
+                    <span className="step-label">Device Info</span>
+                </div>
+                <span className="step-divider" />
+                <div className="setup-step">
+                    <span className="step-number">2</span>
+                    <span className="step-label">Upload Data</span>
+                </div>
+                <span className="step-divider" />
+                <div className="setup-step">
+                    <span className="step-number">3</span>
+                    <span className="step-label">Review</span>
+                </div>
             </div>
 
             <form onSubmit={handleSubmit} className="setup-form">
                 <div className="form-grid">
-                    {/* Row 1: Device Name */}
-                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                    {/* Regulatory Framework Selector */}
+                    <div className="form-group form-group--full">
+                        <label><Globe size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} />Regulatory Framework</label>
+                        <select
+                            className="form-input"
+                            value={templateId}
+                            onChange={(e) => setTemplateId(e.target.value as 'eu_uk_mdr' | 'non_ce')}
+                        >
+                            <option value="eu_uk_mdr">EU MDR + UK MDR (CE-marked devices)</option>
+                            <option value="non_ce">Non-CE Marked (Internal QMS / FDA / TGA)</option>
+                        </select>
+                        <span className="form-hint">
+                            {templateId === 'eu_uk_mdr'
+                                ? 'EU MDR 2017/745 + UK SI 2024/1368. Full MDCG 2022-21 Annex II tables. Includes Notified Body and SRN fields.'
+                                : 'Internal QMS for non-EU/UK markets. FDA 21 CFR 803 / TGA references. CE marking fields show N/A.'}
+                        </span>
+                    </div>
+
+                    {/* Step 1: Device Info */}
+                    <div className="form-group form-group--full">
                         <label>Device Name</label>
                         <input
                             type="text"
@@ -206,15 +253,14 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
                         />
                     </div>
 
-                    {/* Row 2: Dates */}
+                    {/* Reporting Period */}
                     <div className="form-group">
                         <label>Start Date</label>
-                        <div style={{ position: 'relative' }}>
-                            <Calendar size={16} style={{ position: 'absolute', left: 10, top: 12, color: '#666' }} />
+                        <div className="input-icon-wrap">
+                            <Calendar size={16} className="input-icon" />
                             <input
                                 type="date"
-                                className="form-input"
-                                style={{ paddingLeft: '2.5rem' }}
+                                className="form-input form-input--with-icon"
                                 value={startDate}
                                 onChange={(e) => setStartDate(e.target.value)}
                             />
@@ -223,12 +269,11 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
 
                     <div className="form-group">
                         <label>End Date</label>
-                        <div style={{ position: 'relative' }}>
-                            <Calendar size={16} style={{ position: 'absolute', left: 10, top: 12, color: '#666' }} />
+                        <div className="input-icon-wrap">
+                            <Calendar size={16} className="input-icon" />
                             <input
                                 type="date"
-                                className="form-input"
-                                style={{ paddingLeft: '2.5rem' }}
+                                className="form-input form-input--with-icon"
                                 value={endDate}
                                 onChange={(e) => setEndDate(e.target.value)}
                             />
@@ -275,7 +320,10 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
                     </div>
 
                     {/* Master context intake - single golden source for all agents */}
-                    <div className="master-context-section" style={{ gridColumn: 'span 2' }}>
+                    {/* Step 2: Upload Data - already above */}
+
+                    {/* Step 3: Review - Master Context */}
+                    <div className="master-context-section form-group--full">
                         <button
                             type="button"
                             className="master-context-toggle"
@@ -286,7 +334,7 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
                         </button>
                         {showMasterContext && (
                             <div className="master-context-fields">
-                                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                                <div className="form-group form-group--full">
                                     <label>Exposure denominator scope</label>
                                     <select
                                         className="form-input"
@@ -322,7 +370,7 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
                                         <option value="allow_reasonable_inference">Allow reasonable inference</option>
                                     </select>
                                 </div>
-                                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                                <div className="form-group form-group--full">
                                     <label>Closure definition (optional)</label>
                                     <input
                                         type="text"
@@ -332,7 +380,7 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
                                         onChange={(e) => setClosureDefinition(e.target.value)}
                                     />
                                 </div>
-                                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                                <div className="form-group form-group--full">
                                     <span className="checkbox-label">Data availability (uncheck if not done / not available)</span>
                                     <label className="checkbox-row">
                                         <input
@@ -373,7 +421,7 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
 
                     {/* Validation Results */}
                     {validationResult && (
-                        <div className="validation-results" style={{ gridColumn: 'span 2' }}>
+                        <div className="validation-results form-group--full">
                             <div className={`validation-header ${validationResult.valid ? 'valid' : 'invalid'}`}>
                                 {validationResult.valid ? (
                                     <><CheckCircle size={18} /> Data Validation Passed</>
@@ -400,17 +448,25 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({ onSessionCreated, on
                             <div className="validation-summary">
                                 <div className="summary-row">
                                     <span>Units Distributed:</span>
-                                    <span className={validationResult.extracted_data.exposure_denominator_value === 0 ? 'value-error' : 'value-ok'}>
-                                        {validationResult.extracted_data.exposure_denominator_value.toLocaleString()}
+                                    <span className={validationResult.extracted_data.total_units_sold === 0 ? 'value-error' : 'value-ok'}>
+                                        {validationResult.extracted_data.total_units_sold.toLocaleString()}
                                     </span>
                                 </div>
                                 <div className="summary-row">
                                     <span>Total Complaints:</span>
-                                    <span>{validationResult.extracted_data.total_complaints_canonical}</span>
+                                    <span>{validationResult.extracted_data.total_complaints}</span>
                                 </div>
                                 <div className="summary-row">
                                     <span>Closed Complaints:</span>
-                                    <span>{validationResult.extracted_data.complaints_closed_canonical}</span>
+                                    <span>{validationResult.extracted_data.complaints_closed_count}</span>
+                                </div>
+                                <div className="summary-row">
+                                    <span>Root Cause Identified:</span>
+                                    <span>{validationResult.extracted_data.complaints_with_root_cause_identified}</span>
+                                </div>
+                                <div className="summary-row">
+                                    <span>Serious Incidents:</span>
+                                    <span>{validationResult.extracted_data.serious_incidents}</span>
                                 </div>
                             </div>
                             

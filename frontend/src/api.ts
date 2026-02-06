@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api`;
 
 export interface Session {
     id: number;
@@ -47,11 +47,30 @@ export interface SectionDoc {
     qc_feedback?: string;
 }
 
+export interface ChartInfo {
+    id: number;
+    chart_id: string;
+    title: string;
+    category: string;
+    section_id: string;
+    created_at: string;
+}
+
+export interface ChartData {
+    chart_id: string;
+    title: string;
+    category: string;
+    section_id: string;
+    base64_png: string;
+}
+
+const API_BASE = API_BASE_URL;
+
 export const api = {
     // Session Management
-    async createSession(device_name: string, udi_di: string, start_date: string, end_date: string) {
+    async createSession(device_name: string, udi_di: string, start_date: string, end_date: string, template_id: string = 'eu_uk_mdr') {
         const response = await axios.post(`${API_BASE_URL}/sessions`, null, {
-            params: { device_name, udi_di, start_date, end_date }
+            params: { device_name, udi_di, start_date, end_date, template_id }
         });
         return response.data;
     },
@@ -179,12 +198,53 @@ export const api = {
     },
 
     async getWorkflowStatus(sessionId: number) {
-        const response = await axios.get(`${API_BASE_URL}/sessions/${sessionId}/workflow-status`);
-        return response.data;
+        try {
+            const response = await axios.get(`${API_BASE_URL}/sessions/${sessionId}/workflow`);
+            const w = response.data;
+            return {
+                session_id: sessionId,
+                session_status: w.status ?? 'not_started',
+                orchestrator_active: false,
+                workflow_state: {
+                    status: w.status ?? 'not_started',
+                    current_section: w.current_section ?? null,
+                    sections_completed: w.sections_completed ?? 0,
+                    total_sections: w.total_sections ?? 13,
+                    paused: w.paused ?? false,
+                    current_agent: w.current_agent ?? null,
+                },
+                orchestrator_status: null
+            };
+        } catch {
+            return null;
+        }
     },
 
     async getAvailableAgents() {
         const response = await axios.get(`${API_BASE_URL}/agents`);
         return response.data;
-    }
+    },
+
+    // Charts
+    async getCharts(sessionId: number): Promise<ChartInfo[]> {
+        const response = await axios.get(`${API_BASE_URL}/sessions/${sessionId}/charts`);
+        return response.data;
+    },
+
+    async getChartData(sessionId: number, chartId: string): Promise<ChartData> {
+        const response = await axios.get(`${API_BASE_URL}/sessions/${sessionId}/charts/${chartId}`);
+        return response.data;
+    },
+
+    getChartPngUrl(sessionId: number, chartId: string): string {
+        return `${API_BASE}/sessions/${sessionId}/charts/${chartId}/png`;
+    },
+
+    // Section Preview
+    async getSectionPreview(sessionId: number, sectionId: string) {
+        const response = await axios.get(
+            `${API_BASE_URL}/sessions/${sessionId}/sections/${sectionId}/preview`
+        );
+        return response.data;
+    },
 };

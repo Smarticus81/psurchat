@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 import asyncio
+import io
 import json
 import traceback
 from datetime import datetime
@@ -17,11 +18,12 @@ from datetime import datetime
 from backend.database.session import get_db_context, get_db, init_db
 from backend.database.models import (
     PSURSession, Agent, ChatMessage, SectionDocument,
-    WorkflowState, DataFile
+    WorkflowState, DataFile, ChartAsset
 )
-from backend.sota_orchestrator import SOTAOrchestrator, AGENT_ROLES, SECTION_DEFINITIONS, WORKFLOW_ORDER
+from backend.psur import SOTAOrchestrator, AGENT_ROLES, SECTION_DEFINITIONS, WORKFLOW_ORDER
+from backend.psur.context import PSURContext
+from backend.psur.extraction import extract_from_file
 from backend.config import AGENT_CONFIGS, settings
-from backend.data_processor import MasterContextExtractor
 
 # Initialize FastAPI
 app = FastAPI(
@@ -30,10 +32,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS Configuration - must be added before other middleware
+# CORS Configuration (permissive for MVP; restrict in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -59,6 +61,16 @@ async def startup_event():
     print("Initializing database...")
     init_db()
     print("Database initialized successfully")
+
+    # Check matplotlib availability at startup
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        print("[startup] matplotlib is available for chart generation")
+    except ImportError:
+        print("[startup] WARNING: matplotlib not installed. Charts will NOT be generated.")
+        print("[startup] Install with: pip install matplotlib")
 
 # WebSocket Connection Manager
 class ConnectionManager:
@@ -105,6 +117,7 @@ async def create_session(
     udi_di: str,
     start_date: str,
     end_date: str,
+    template_id: str = "eu_uk_mdr",
     db: Session = Depends(get_db)
 ):
     """Create a new PSUR generation session"""
@@ -112,12 +125,13 @@ async def create_session(
         # Parse dates
         start = datetime.fromisoformat(start_date)
         end = datetime.fromisoformat(end_date)
-        
+
         session = PSURSession(
             device_name=device_name,
             udi_di=udi_di,
             period_start=start,
             period_end=end,
+            template_id=template_id,
             status="initializing",
             created_at=datetime.utcnow()
         )
@@ -139,6 +153,7 @@ async def create_session(
         return {
             "session_id": session.id,
             "device_name": device_name,
+            "template_id": template_id,
             "status": "initialized"
         }
     except Exception as e:
@@ -232,7 +247,7 @@ async def get_session(session_id: int, db: Session = Depends(get_db)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-from backend.data_processor import DataProcessor
+from backend.psur.extraction import analyze_upload
 
 @app.post("/api/sessions/{session_id}/upload")
 async def upload_file(
@@ -256,7 +271,7 @@ async def upload_file(
         db.add(data_file)
         
         # Process file data
-        result = DataProcessor.process_file(content, file.filename, file_type)
+        result = analyze_upload(content, file.filename, file_type)
         analysis = result["summary"]
         metadata = result["metadata"]
         
@@ -402,21 +417,19 @@ async def set_master_context_intake(
 
 @app.get("/api/sessions/{session_id}/validate")
 async def validate_session_data(session_id: int, db: Session = Depends(get_db)):
-    """Check if uploaded data can be parsed correctly before starting generation."""
+    """Check if uploaded data can be parsed correctly before starting generation.
+    Uses the same unified extraction.py pipeline as the orchestrator."""
     try:
         session = db.query(PSURSession).filter(PSURSession.id == session_id).first()
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
         data_files = db.query(DataFile).filter(DataFile.session_id == session_id).all()
-        period_start = getattr(session, "period_start", None)
-        period_end = getattr(session, "period_end", None)
-        intake = getattr(session, "master_context_intake", None) or {}
 
         issues: List[Dict[str, str]] = []
-        
+
         # Check for required file types
-        file_types = [f.file_type for f in data_files]
+        file_types = [getattr(f, "file_type", "") for f in data_files]
         if "sales" not in file_types:
             issues.append({"severity": "warning", "message": "No sales/distribution data file uploaded. Units distributed will be 0."})
         if "complaints" not in file_types:
@@ -424,49 +437,61 @@ async def validate_session_data(session_id: int, db: Session = Depends(get_db)):
         if len(data_files) == 0:
             issues.append({"severity": "error", "message": "No data files uploaded. Please upload at least one data file."})
 
-        # Run extraction and report what was found
-        master_context = MasterContextExtractor.extract(data_files, period_start, period_end, intake)
-        
+        # Run the SAME extraction pipeline the orchestrator uses
+        ctx = PSURContext()
+        all_mappings: Dict[str, Any] = {}
+
+        for df_obj in data_files:
+            _file_type = getattr(df_obj, "file_type", "") or ""
+            _filename = getattr(df_obj, "filename", "") or ""
+            _file_data = getattr(df_obj, "file_data", b"") or b""
+
+            diag = extract_from_file(_file_data, _filename, _file_type, ctx)
+            if diag.get("warnings"):
+                for w in diag["warnings"]:
+                    issues.append({"severity": "warning", "message": w})
+            if diag.get("columns_detected"):
+                all_mappings[_filename] = diag["columns_detected"]
+
+        ctx.calculate_metrics()
+
         # Check extraction results
-        if master_context["exposure_denominator_value"] == 0:
+        if ctx.total_units_sold == 0 and "sales" in file_types:
             issues.append({
-                "severity": "error", 
-                "message": "Could not extract units distributed. Check sales file column names. Looking for: units, quantity, qty, sold, distributed, shipped, volume, amount, count"
+                "severity": "error",
+                "message": "Could not extract units distributed from sales files. Check column names. Looking for: units, quantity, qty, sold, distributed, shipped, volume."
             })
-        
-        if master_context["total_complaints_canonical"] > 0:
-            column_mapping = master_context.get("column_mapping", {})
-            complaints_mapping = column_mapping.get("complaints", {})
-            if not complaints_mapping.get("severity_column"):
+
+        if ctx.total_complaints > 0:
+            if not ctx.complaints_by_severity:
                 issues.append({
-                    "severity": "warning", 
+                    "severity": "warning",
                     "message": "Complaints found but severity column not detected. Severity analysis will be limited."
                 })
-            if not complaints_mapping.get("closure_column"):
+            if ctx.complaints_closed_count == 0:
                 issues.append({
-                    "severity": "warning", 
-                    "message": "Complaints found but closure/status column not detected. Investigation status cannot be determined."
+                    "severity": "warning",
+                    "message": "Complaints found but no closure/status column detected or no closed complaints. Investigation closure rate is 0%."
                 })
-        
-        # Add any parsing warnings from the extractor
-        for warning in master_context.get("parsing_warnings", []):
-            issues.append({"severity": "warning", "message": warning})
-        
-        # Determine overall validity (errors = can't proceed, warnings = proceed with caution)
+
         has_errors = any(i["severity"] == "error" for i in issues)
-        
+
         return {
             "valid": not has_errors,
             "issues": issues,
             "extracted_data": {
-                "exposure_denominator_value": master_context["exposure_denominator_value"],
-                "total_complaints_canonical": master_context["total_complaints_canonical"],
-                "complaints_closed_canonical": master_context["complaints_closed_canonical"],
-                "annual_units_canonical": master_context["annual_units_canonical"],
-                "has_sales": master_context["has_sales"],
-                "has_complaints": master_context["has_complaints"],
-                "has_vigilance": master_context["has_vigilance"],
-                "column_mapping": master_context.get("column_mapping", {}),
+                "total_units_sold": ctx.total_units_sold,
+                "total_complaints": ctx.total_complaints,
+                "complaints_closed_count": ctx.complaints_closed_count,
+                "complaints_with_root_cause_identified": ctx.complaints_with_root_cause_identified,
+                "total_units_by_year": ctx.total_units_by_year,
+                "total_complaints_by_year": ctx.total_complaints_by_year,
+                "serious_incidents": ctx.serious_incidents,
+                "total_vigilance_events": ctx.total_vigilance_events,
+                "has_sales": ctx.sales_data_available,
+                "has_complaints": ctx.complaint_data_available,
+                "has_vigilance": ctx.vigilance_data_available,
+                "column_mappings": all_mappings,
             }
         }
     except HTTPException:
@@ -478,21 +503,12 @@ async def validate_session_data(session_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/sessions/{session_id}/start")
 async def start_generation(session_id: int, db: Session = Depends(get_db)):
-    """Start PSUR generation: run master context extraction then orchestrator."""
+    """Start PSUR generation. The orchestrator handles all extraction internally."""
     try:
         session = db.query(PSURSession).filter(PSURSession.id == session_id).first()
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        data_files = db.query(DataFile).filter(DataFile.session_id == session_id).all()
-        period_start = getattr(session, "period_start", None)
-        period_end = getattr(session, "period_end", None)
-        intake = getattr(session, "master_context_intake", None) or {}
-
-        master_context = MasterContextExtractor.extract(
-            data_files, period_start, period_end, intake
-        )
-        setattr(session, "master_context", master_context)
         setattr(session, "status", "running")
         db.commit()
 
@@ -501,7 +517,7 @@ async def start_generation(session_id: int, db: Session = Depends(get_db)):
         return {
             "status": "started",
             "session_id": session_id,
-            "message": "PSUR generation initiated; master context extracted.",
+            "message": "PSUR generation initiated.",
         }
     except HTTPException:
         raise
@@ -676,7 +692,7 @@ async def create_message(
     input: MessageInput,
     db: Session = Depends(get_db)
 ):
-    """Post a new message to the session"""
+    """Post a new message to the session. If from User, generate AI response."""
     try:
         msg = ChatMessage(
             session_id=session_id,
@@ -684,29 +700,114 @@ async def create_message(
             to_agent=input.to_agent,
             message=input.message,
             message_type=input.message_type,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
+            processed=False,
         )
         db.add(msg)
         db.commit()
         db.refresh(msg)
-        
+
         # Notify clients via WebSocket
         await manager.broadcast({
             "type": "new_message",
             "data": {
                 "id": msg.id,
                 "from_agent": msg.from_agent,
+                "to_agent": msg.to_agent,
                 "message": msg.message,
                 "message_type": msg.message_type,
                 "timestamp": msg.timestamp.isoformat() if msg.timestamp else None
             }
         })
-        
+
+        # If from User, generate an AI response asynchronously
+        if input.from_agent == "User":
+            asyncio.create_task(_respond_to_user_message(
+                session_id, msg.id, input.message, input.to_agent
+            ))
+
         return {"status": "ok", "message_id": msg.id}
     except Exception as e:
         db.rollback()
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _respond_to_user_message(session_id: int, msg_id: int,
+                                    message: str, target: str):
+    """Generate an AI response to a user message and post it to chat."""
+    from backend.psur.ai_client import call_ai
+
+    try:
+        # Determine which agent should respond
+        responder = "Alex"  # default
+        for name in AGENT_CONFIGS:
+            if f"@{name}" in message or f"@{name.lower()}" in message.lower():
+                responder = name
+                break
+        if target != "all" and target in AGENT_CONFIGS:
+            responder = target
+
+        # Get orchestrator context if available
+        ctx_summary = ""
+        if session_id in active_orchestrators:
+            orch = active_orchestrators[session_id]
+            if orch.context:
+                ctx_summary = (
+                    f"Device: {orch.context.device_name}. "
+                    f"Units: {orch.context.total_units_sold:,}. "
+                    f"Complaints: {orch.context.total_complaints}. "
+                    f"Phase: {orch.current_phase}."
+                )
+
+        cfg = AGENT_CONFIGS.get(responder, AGENT_CONFIGS.get("Alex"))
+        role_info = AGENT_ROLES.get(responder, {})
+        personality = role_info.get("personality", "")
+        sys_prompt = (
+            f"You are {responder}, {cfg.role if cfg else 'PSUR Agent'}. {personality} "
+            f"{ctx_summary} "
+            "Respond concisely in prose (2-4 sentences). No bullet points. "
+            "You are speaking directly to the user in a professional team chat."
+        )
+
+        response = await call_ai(responder, sys_prompt, f'User says: "{message}"')
+        if not response:
+            response = f"I apologize, I could not generate a response at this time. Please try again."
+
+        # Save response to DB
+        with get_db_context() as db2:
+            resp_msg = ChatMessage(
+                session_id=session_id,
+                from_agent=responder,
+                to_agent="User",
+                message=response,
+                message_type="normal",
+                timestamp=datetime.utcnow(),
+                response_to_id=msg_id,
+            )
+            db2.add(resp_msg)
+
+            # Mark original message as processed (Boolean column only)
+            orig = db2.query(ChatMessage).filter(ChatMessage.id == msg_id).first()
+            if orig:
+                orig.processed = True
+            db2.commit()
+
+        # Broadcast response
+        await manager.broadcast({
+            "type": "new_message",
+            "data": {
+                "from_agent": responder,
+                "to_agent": "User",
+                "message": response,
+                "message_type": "normal",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        })
+
+    except Exception as e:
+        print(f"[chat] Error responding to user message: {e}")
+        traceback.print_exc()
 
 
 # ============================================================================
@@ -810,17 +911,33 @@ async def ask_agent(session_id: int, input: AskAgentInput, db: Session = Depends
             }
         })
         
-        # Get or create orchestrator for context
+        # Use active orchestrator if available; otherwise use a lightweight direct call
         if session_id in active_orchestrators:
             orchestrator = active_orchestrators[session_id]
+            result = await orchestrator.ask_agent_directly(input.agent, input.question)
         else:
-            orchestrator = SOTAOrchestrator(session_id)
-            # Initialize context if not already done
-            if orchestrator.context is None:
-                await orchestrator._initialize_context()
-        
-        # Get agent response
-        result = await orchestrator.ask_agent_directly(input.agent, input.question)
+            # No active workflow -- respond directly without heavy initialization
+            from backend.psur.ai_client import call_ai
+            cfg = AGENT_CONFIGS.get(input.agent, AGENT_CONFIGS.get("Alex"))
+            role_info = AGENT_ROLES.get(input.agent, {})
+            personality = role_info.get("personality", "")
+            sys_prompt = (
+                f"You are {input.agent}, {cfg.role if cfg else 'PSUR Agent'}. {personality} "
+                f"Device: {session.device_name}. Answer directly and concisely."
+            )
+            response = await call_ai(input.agent, sys_prompt, input.question)
+            # Save the response to chat
+            resp_msg = ChatMessage(
+                session_id=session_id,
+                from_agent=input.agent,
+                to_agent="User",
+                message=response or "No response available.",
+                message_type="normal",
+                timestamp=datetime.utcnow(),
+                response_to_id=user_msg.id,
+            )
+            db.add(resp_msg)
+            result = {"response": response, "agent": input.agent, "error": None}
         
         # Mark user message as processed
         user_msg.processed = True
@@ -850,39 +967,48 @@ async def ask_agent(session_id: int, input: AskAgentInput, db: Session = Depends
 async def get_workflow_status(session_id: int, db: Session = Depends(get_db)):
     """Get current workflow status including pause state."""
     try:
-        # Check if session exists
         session = db.query(PSURSession).filter(PSURSession.id == session_id).first()
         if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+            # Return safe default instead of 404 -- the frontend polls this endpoint
+            return {
+                "session_id": session_id,
+                "session_status": "unknown",
+                "orchestrator_active": False,
+                "workflow_state": None,
+                "orchestrator_status": None
+            }
         
-        # Get workflow state from database
         workflow_state = db.query(WorkflowState).filter(
             WorkflowState.session_id == session_id
         ).first()
         
-        # Check if there's an active orchestrator
         orchestrator_active = session_id in active_orchestrators
         orchestrator_status = None
         
         if orchestrator_active:
-            orchestrator_status = active_orchestrators[session_id].get_workflow_status()
+            try:
+                orchestrator_status = active_orchestrators[session_id].get_workflow_status()
+            except Exception:
+                pass
+        
+        ws_data = None
+        if workflow_state:
+            ws_data = {
+                "status": getattr(workflow_state, "status", "not_started"),
+                "current_section": getattr(workflow_state, "current_section", None),
+                "sections_completed": getattr(workflow_state, "sections_completed", 0),
+                "total_sections": getattr(workflow_state, "total_sections", 13),
+                "paused": getattr(workflow_state, "paused", False),
+                "current_agent": getattr(workflow_state, "current_agent", None),
+            }
         
         return {
             "session_id": session_id,
             "session_status": session.status,
             "orchestrator_active": orchestrator_active,
-            "workflow_state": {
-                "status": workflow_state.status if workflow_state else "not_started",
-                "current_section": workflow_state.current_section if workflow_state else None,
-                "sections_completed": workflow_state.sections_completed if workflow_state else 0,
-                "total_sections": workflow_state.total_sections if workflow_state else 13,
-                "paused": workflow_state.paused if workflow_state else False,
-                "current_agent": workflow_state.current_agent if workflow_state else None
-            } if workflow_state else None,
+            "workflow_state": ws_data,
             "orchestrator_status": orchestrator_status
         }
-    except HTTPException:
-        raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -902,85 +1028,269 @@ async def list_agents():
     return {"agents": agents}
 
 
+@app.get("/api/templates")
+async def list_templates():
+    """List available PSUR report templates."""
+    from backend.psur.templates import get_template_choices
+    return {"templates": get_template_choices()}
+
+
 @app.get("/api/sessions/{session_id}/document/download")
 async def download_document(session_id: int, db: Session = Depends(get_db)):
-    """Download complete PSUR as DOCX"""
+    """Download complete PSUR as DOCX with rich cover page, data tables, and inline charts."""
     try:
         from fastapi.responses import FileResponse
-        from docx import Document
-        from docx.shared import Pt
+        from docx import Document as DocxDocument
+        from docx.shared import Pt, Inches
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         import tempfile
         import os
-        
+        import re
+
+        from backend.psur.templates import load_template
+        from backend.psur.docx_tables import (
+            build_cover_manufacturer_table,
+            build_cover_regulatory_table,
+            build_cover_document_table,
+            build_tables_for_section,
+            parse_markdown_table,
+            insert_markdown_table,
+        )
+        from backend.psur.context import PSURContext
+        from backend.psur.extraction import extract_from_file
+
         session = db.query(PSURSession).filter(PSURSession.id == session_id).first()
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        
+
         sections = db.query(SectionDocument)\
             .filter(SectionDocument.session_id == session_id)\
             .order_by(SectionDocument.section_id)\
             .all()
-        
-        # Create Word Doc
-        doc = Document()
-        
-        # Styles
+
+        # Load template
+        template_id = getattr(session, "template_id", None) or "eu_uk_mdr"
+        template = load_template(template_id)
+
+        # Try to load PSURContext from saved snapshot first (exact same data as workflow)
+        ctx = None
+        snapshot_json = getattr(session, "context_snapshot", None) or ""
+        if snapshot_json:
+            try:
+                from dataclasses import fields as dc_fields
+                snapshot = json.loads(snapshot_json)
+                ctx = PSURContext()
+                for f in dc_fields(ctx):
+                    if f.name in snapshot:
+                        val = snapshot[f.name]
+                        # Restore date objects
+                        if f.name in ("period_start", "period_end") and isinstance(val, str):
+                            try:
+                                val = datetime.fromisoformat(val)
+                            except Exception:
+                                pass
+                        # Restore int keys for year dicts
+                        if f.name in ("total_units_by_year", "total_complaints_by_year",
+                                      "complaint_rate_by_year", "annual_units_golden") and isinstance(val, dict):
+                            val = {int(k): v for k, v in val.items()}
+                        try:
+                            setattr(ctx, f.name, val)
+                        except Exception:
+                            pass
+                print(f"[download] Loaded context from snapshot ({len(snapshot_json)} bytes)")
+            except Exception as e:
+                print(f"[download] Failed to load context snapshot: {e}. Re-extracting...")
+                ctx = None
+
+        # Fallback: reconstruct from files if no snapshot
+        if ctx is None:
+            print("[download] No context snapshot. Reconstructing from files...")
+            ctx = PSURContext(
+                device_name=session.device_name or "Unknown Device",
+                udi_di=session.udi_di or "",
+                period_start=session.period_start,
+                period_end=session.period_end,
+                template_id=template_id,
+            )
+            _master = getattr(session, "master_context", None) or {}
+            if not isinstance(_master, dict):
+                _master = {}
+            if _master:
+                ctx.manufacturer = str(_master.get("manufacturer", "") or "")
+                ctx.manufacturer_address = str(_master.get("manufacturer_address", "") or "")
+                ctx.manufacturer_srn = str(_master.get("manufacturer_srn", "") or "")
+                ctx.authorized_rep = str(_master.get("authorized_rep", "") or "")
+                ctx.notified_body = str(_master.get("notified_body", "") or "")
+                ctx.notified_body_number = str(_master.get("notified_body_number", "") or "")
+                ctx.intended_use = str(_master.get("intended_use", "") or "")
+                ctx.device_type = str(_master.get("device_type", "") or "")
+
+            data_files = db.query(DataFile).filter(DataFile.session_id == session_id).all()
+            for df_obj in data_files:
+                _file_type = getattr(df_obj, "file_type", "") or ""
+                _filename = getattr(df_obj, "filename", "") or ""
+                _file_data = getattr(df_obj, "file_data", b"") or b""
+                try:
+                    extract_from_file(_file_data, _filename, _file_type, ctx)
+                except Exception as ext_err:
+                    print(f"[download] Extraction error for {_filename}: {ext_err}")
+
+            if _master:
+                ed = int(_master.get("exposure_denominator_value", 0) or 0)
+                if ed > 0:
+                    ctx.total_units_sold = ed
+                au = _master.get("annual_units_canonical") or {}
+                if au:
+                    ctx.total_units_by_year = {int(k): int(v) for k, v in au.items()}
+                cc = int(_master.get("complaints_closed_canonical", 0) or 0)
+                if cc > 0:
+                    ctx.complaints_closed_count = cc
+
+            ctx.calculate_metrics()
+            ctx.psur_sequence_number = session_id
+
+        # ---- Build DOCX ----
+        doc = DocxDocument()
+
+        # Normal style
         style = doc.styles['Normal']
-        font = style.font
-        font.name = 'Calibri'
-        font.size = Pt(11)
-        
-        # Title Page
+        style.font.name = 'Calibri'
+        style.font.size = Pt(11)
+
+        # === COVER PAGE ===
         doc.add_heading('PERIODIC SAFETY UPDATE REPORT (PSUR)', 0)
-        
         p = doc.add_paragraph()
-        p.add_run(f"Device: {session.device_name}\n").bold = True
-        p.add_run(f"UDI-DI: {session.udi_di}\n")
-        p.add_run(f"Period: {session.period_start.strftime('%Y-%m-%d') if session.period_start else 'N/A'} to {session.period_end.strftime('%Y-%m-%d') if session.period_end else 'N/A'}\n")
-        p.add_run(f"Generated: {datetime.utcnow().strftime('%Y-%m-%d')} UTC")
+        p.add_run(f"Device: {session.device_name}").bold = True
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
+
+        p2 = doc.add_paragraph()
+        p2.add_run(f"UDI-DI: {session.udi_di or 'Pending'}")
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        p3 = doc.add_paragraph()
+        period_str = f"{session.period_start.strftime('%d %B %Y') if session.period_start else 'N/A'} to {session.period_end.strftime('%d %B %Y') if session.period_end else 'N/A'}"
+        p3.add_run(f"Reporting Period: {period_str}")
+        p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        p4 = doc.add_paragraph()
+        p4.add_run(f"Regulatory Framework: {template.name}")
+        p4.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        p5 = doc.add_paragraph()
+        p5.add_run(f"Generated: {datetime.utcnow().strftime('%d %B %Y')} UTC")
+        p5.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        # Cover page tables
+        build_cover_manufacturer_table(doc, ctx)
+        build_cover_regulatory_table(doc, ctx, template)
+        build_cover_document_table(doc, ctx)
+
         doc.add_page_break()
-        
-        # Content
+
+        # === TABLE OF CONTENTS placeholder ===
+        doc.add_heading("Table of Contents", level=1)
+        for sec in sections:
+            spec = template.section_specs.get(sec.section_id)
+            title = spec.title if spec else sec.section_name
+            doc.add_paragraph(
+                f"Section {sec.section_id}: {title}",
+                style="List Number"
+            )
+        doc.add_page_break()
+
+        # === SECTION CONTENT ===
+        charts = db.query(ChartAsset).filter(ChartAsset.session_id == session_id).all()
+
         for section in sections:
-            doc.add_heading(f"SECTION {section.section_id}: {section.section_name}", level=1)
-            
-            # Clean markdown basics
+            spec = template.section_specs.get(section.section_id)
+            title = spec.title if spec else section.section_name
+            doc.add_heading(f"Section {section.section_id}: {title}", level=1)
+
+            # Insert data tables BEFORE narrative
+            print(f"[download] Building tables for section {section.section_id}")
+            build_tables_for_section(doc, section.section_id, ctx, template)
+
+            # Insert charts inline AFTER data tables but BEFORE narrative
+            section_charts = [c for c in charts if c.section_id == section.section_id]
+            for chart in section_charts:
+                try:
+                    p_title = doc.add_paragraph()
+                    run = p_title.add_run(chart.title)
+                    run.bold = True
+                    run.font.size = Pt(10)
+                    run.font.name = 'Calibri'
+                    chart_stream = io.BytesIO(chart.png_data)
+                    doc.add_picture(chart_stream, width=Inches(5.5))
+                    last_para = doc.paragraphs[-1]
+                    last_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                except Exception as chart_err:
+                    doc.add_paragraph(f"[Chart: {chart.title} - could not embed: {chart_err}]")
+
+            # Narrative content with markdown-to-DOCX conversion
             content = section.content or "[No content]"
-            
-            # Remove </thinking> blocks if they leaked
+
+            # Remove leaked thinking blocks
             if "</thinking>" in content:
                 content = content.split("</thinking>")[-1].strip()
-                
+
             lines = content.split('\n')
-            for line in lines:
-                line = line.strip()
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
+
+                # Skip empty lines
                 if not line:
+                    i += 1
                     continue
-                
-                if line.startswith('# '):
-                    doc.add_heading(line[2:], level=1)
+
+                # Detect markdown table blocks (consecutive lines with |)
+                if '|' in line and line.startswith('|'):
+                    table_lines = []
+                    while i < len(lines) and '|' in lines[i].strip():
+                        table_lines.append(lines[i])
+                        i += 1
+                    parsed = parse_markdown_table(table_lines)
+                    if parsed:
+                        insert_markdown_table(doc, parsed)
+                    else:
+                        for tl in table_lines:
+                            doc.add_paragraph(tl.strip())
+                    continue
+
+                # Headings
+                if line.startswith('### '):
+                    doc.add_heading(line[4:], level=3)
                 elif line.startswith('## '):
                     doc.add_heading(line[3:], level=2)
-                elif line.startswith('### '):
-                    doc.add_heading(line[4:], level=3)
+                elif line.startswith('# '):
+                    doc.add_heading(line[2:], level=2)
                 elif line.startswith('- ') or line.startswith('* '):
                     doc.add_paragraph(line[2:], style='List Bullet')
                 else:
-                    doc.add_paragraph(line)
-            
-            doc.add_page_break()
-        
+                    # Regular paragraph with bold/italic support
+                    p = doc.add_paragraph()
+                    # Parse inline bold (**text**) and italic (*text*)
+                    parts = re.split(r'(\*\*.*?\*\*|\*.*?\*)', line)
+                    for part in parts:
+                        if part.startswith('**') and part.endswith('**'):
+                            run = p.add_run(part[2:-2])
+                            run.bold = True
+                        elif part.startswith('*') and part.endswith('*'):
+                            run = p.add_run(part[1:-1])
+                            run.italic = True
+                        else:
+                            p.add_run(part)
+
+                i += 1
+
         # Save to temp file
         temp_dir = tempfile.gettempdir()
         filename = f"PSUR_{session.device_name.replace(' ', '_')}_{session_id}.docx"
         filepath = os.path.join(temp_dir, filename)
         doc.save(filepath)
-        
+
         return FileResponse(
-            path=filepath, 
+            path=filepath,
             filename=filename,
             media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         )
@@ -992,27 +1302,192 @@ async def download_document(session_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/sessions/{session_id}/workflow")
 async def get_workflow(session_id: int, db: Session = Depends(get_db)):
-    """Get workflow state"""
+    """Get workflow state -- returns safe defaults when workflow has not started."""
     try:
         workflow = db.query(WorkflowState)\
             .filter(WorkflowState.session_id == session_id)\
             .first()
         
         if not workflow:
-            raise HTTPException(status_code=404, detail="Workflow not found")
+            return {
+                "current_section": None,
+                "sections_completed": 0,
+                "total_sections": 13,
+                "status": "not_started",
+                "summary": None,
+                "paused": False,
+                "current_agent": None
+            }
         
         return {
-            "current_section": workflow.current_section,
-            "sections_completed": workflow.sections_completed,
-            "total_sections": workflow.total_sections,
-            "status": workflow.status,
-            "summary": workflow.summary
+            "current_section": getattr(workflow, "current_section", None),
+            "sections_completed": getattr(workflow, "sections_completed", 0),
+            "total_sections": getattr(workflow, "total_sections", 13),
+            "status": getattr(workflow, "status", "not_started"),
+            "summary": getattr(workflow, "summary", None),
+            "paused": getattr(workflow, "paused", False),
+            "current_agent": getattr(workflow, "current_agent", None)
+        }
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# SECTION PREVIEW ENDPOINT
+# ============================================================================
+
+@app.get("/api/sessions/{session_id}/sections/{section_id}/preview")
+async def preview_section(session_id: int, section_id: str, db: Session = Depends(get_db)):
+    """Get an HTML preview of a single section with its tables and charts."""
+    try:
+        section = db.query(SectionDocument).filter(
+            SectionDocument.session_id == session_id,
+            SectionDocument.section_id == section_id,
+        ).first()
+        if not section:
+            raise HTTPException(status_code=404, detail="Section not found")
+
+        import base64
+        from backend.psur.templates import load_template
+
+        template_id = "eu_uk_mdr"
+        sess = db.query(PSURSession).filter(PSURSession.id == session_id).first()
+        if sess:
+            template_id = getattr(sess, "template_id", None) or "eu_uk_mdr"
+        template = load_template(template_id)
+        spec = template.section_specs.get(section_id)
+        title = spec.title if spec else (section.section_name or f"Section {section_id}")
+
+        # Build HTML preview
+        html_parts = [
+            f"<h2>Section {section_id}: {title}</h2>",
+            f"<p style='color:#888;font-size:0.85em;'>Author: {section.author_agent} | "
+            f"Status: {section.status} | "
+            f"Words: {len(section.content.split()) if section.content else 0}</p>",
+        ]
+
+        # Embed charts for this section
+        charts = db.query(ChartAsset).filter(
+            ChartAsset.session_id == session_id,
+            ChartAsset.section_id == section_id,
+        ).all()
+        for chart in charts:
+            b64 = base64.b64encode(chart.png_data).decode("utf-8")
+            html_parts.append(
+                f"<div style='text-align:center;margin:16px 0;'>"
+                f"<p style='font-weight:bold;'>{chart.title}</p>"
+                f"<img src='data:image/png;base64,{b64}' style='max-width:100%;'/>"
+                f"</div>"
+            )
+
+        # Convert markdown content to HTML
+        content = section.content or "[No content generated yet]"
+        # Remove leaked thinking blocks
+        if "</thinking>" in content:
+            content = content.split("</thinking>")[-1].strip()
+
+        import re
+        for line in content.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("### "):
+                html_parts.append(f"<h4>{line[4:]}</h4>")
+            elif line.startswith("## "):
+                html_parts.append(f"<h3>{line[3:]}</h3>")
+            elif line.startswith("# "):
+                html_parts.append(f"<h3>{line[2:]}</h3>")
+            else:
+                # Inline bold/italic
+                line = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)
+                line = re.sub(r'\*(.+?)\*', r'<em>\1</em>', line)
+                html_parts.append(f"<p>{line}</p>")
+
+        return {
+            "section_id": section_id,
+            "title": title,
+            "status": section.status,
+            "word_count": len(section.content.split()) if section.content else 0,
+            "charts_count": len(charts),
+            "html": "\n".join(html_parts),
         }
     except HTTPException:
         raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# CHART ENDPOINTS
+# ============================================================================
+
+@app.get("/api/sessions/{session_id}/charts")
+async def get_charts(session_id: int, db: Session = Depends(get_db)):
+    """Get all generated charts for a session."""
+    try:
+        charts = db.query(ChartAsset).filter(
+            ChartAsset.session_id == session_id
+        ).order_by(ChartAsset.chart_id).all()
+        return [
+            {
+                "id": c.id,
+                "chart_id": c.chart_id,
+                "title": c.title,
+                "category": c.category,
+                "section_id": c.section_id,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in charts
+        ]
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sessions/{session_id}/charts/{chart_id}")
+async def get_chart_image(session_id: int, chart_id: str, db: Session = Depends(get_db)):
+    """Get a specific chart as base64 PNG."""
+    try:
+        chart = db.query(ChartAsset).filter(
+            ChartAsset.session_id == session_id,
+            ChartAsset.chart_id == chart_id,
+        ).first()
+        if not chart:
+            raise HTTPException(status_code=404, detail="Chart not found")
+        import base64
+        return {
+            "chart_id": chart.chart_id,
+            "title": chart.title,
+            "category": chart.category,
+            "section_id": chart.section_id,
+            "base64_png": base64.b64encode(chart.png_data).decode("utf-8"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sessions/{session_id}/charts/{chart_id}/png")
+async def get_chart_png(session_id: int, chart_id: str, db: Session = Depends(get_db)):
+    """Get a chart as raw PNG binary (for <img> tags)."""
+    try:
+        from fastapi.responses import Response
+        chart = db.query(ChartAsset).filter(
+            ChartAsset.session_id == session_id,
+            ChartAsset.chart_id == chart_id,
+        ).first()
+        if not chart:
+            raise HTTPException(status_code=404, detail="Chart not found")
+        return Response(content=chart.png_data, media_type="image/png")
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ============================================================================
 # WEBSOCKET ENDPOINT

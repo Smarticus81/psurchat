@@ -482,3 +482,107 @@
 .chat-messages::-webkit-scrollbar-thumb:hover {
     background: var(--neo-text-muted);
 }
+
+/* Section Preview */
+.message-card__preview-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    margin-top: 6px;
+    font-size: 0.72rem;
+    color: var(--neo-primary, #4C8EDA);
+    background: rgba(76, 142, 218, 0.08);
+    border: 1px solid rgba(76, 142, 218, 0.2);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.message-card__preview-btn:hover {
+    background: rgba(76, 142, 218, 0.16);
+    border-color: rgba(76, 142, 218, 0.4);
+}
+
+.section-preview-overlay {
+    position: absolute;
+    bottom: 60px;
+    left: 8px;
+    right: 8px;
+    max-height: 50%;
+    background: var(--neo-surface, #1E1E2E);
+    border: 1px solid var(--neo-border, #2D2D3F);
+    border-radius: 8px;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.section-preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--neo-border, #2D2D3F);
+    flex-shrink: 0;
+}
+
+.section-preview-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--neo-text, #E4E4E7);
+}
+
+.section-preview-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: none;
+    border: 1px solid var(--neo-border, #2D2D3F);
+    border-radius: 4px;
+    color: var(--neo-text-muted, #8B8FA3);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.section-preview-close:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--neo-text, #E4E4E7);
+}
+
+.section-preview-body {
+    padding: 14px;
+    overflow-y: auto;
+    font-size: 0.82rem;
+    line-height: 1.65;
+    color: var(--neo-text-secondary, #A1A1AA);
+}
+
+.section-preview-body h2,
+.section-preview-body h3,
+.section-preview-body h4 {
+    color: var(--neo-text, #E4E4E7);
+    margin: 12px 0 6px;
+}
+
+.section-preview-body p {
+    margin: 4px 0;
+}
+
+.section-preview-body img {
+    border-radius: 4px;
+    border: 1px solid var(--neo-border, #2D2D3F);
+}
+
+.section-preview-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    font-size: 0.78rem;
+    color: var(--neo-text-muted, #8B8FA3);
+}

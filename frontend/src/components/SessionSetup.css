@@ -45,12 +45,76 @@
     gap: 0.5rem;
 }
 
-.setup-header span {
+.setup-header-icon {
+    color: var(--neo-cyan);
+    flex-shrink: 0;
+}
+
+/* Step Indicators */
+.setup-steps {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    margin-bottom: 1.75rem;
+}
+
+.setup-step {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.step-number {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--neo-cyan-dim);
+    color: var(--neo-cyan);
     font-size: 0.7rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(87, 199, 227, 0.3);
+    flex-shrink: 0;
+}
+
+.step-label {
+    font-size: 0.72rem;
+    color: var(--neo-text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.step-divider {
+    width: 32px;
+    height: 1px;
+    background: var(--neo-border);
+    flex-shrink: 0;
+}
+
+/* Input with icon */
+.input-icon-wrap {
+    position: relative;
+}
+
+.input-icon {
+    position: absolute;
+    left: 10px;
+    top: 12px;
     color: var(--neo-text-muted);
-    background: var(--neo-bg-deep);
-    padding: 0.25rem 0.5rem;
-    border-radius: var(--neo-radius-sm);
+    pointer-events: none;
+}
+
+.form-input--with-icon {
+    padding-left: 2.5rem;
+}
+
+/* Full-width form group in grid */
+.form-group--full {
+    grid-column: span 2;
 }
 
 .setup-form {
@@ -466,4 +530,12 @@
 .btn-warning:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(255, 180, 95, 0.3);
+}
+
+.form-hint {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--neo-text-secondary, #8B8FA3);
+    margin-top: 0.35rem;
+    line-height: 1.4;
 }

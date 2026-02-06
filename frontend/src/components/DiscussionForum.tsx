@@ -1,34 +1,52 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { MessageSquare, ChevronDown, ChevronUp, Pause, Play, AtSign, Loader2, Send } from 'lucide-react';
+import { MessageSquare, ChevronDown, ChevronUp, Pause, Play, Loader2, Send, Eye, X } from 'lucide-react';
 import { api, ChatMessage } from '../api';
 import './DiscussionForum.css';
 
 const COLLAPSED_MAX_LENGTH = 400;
 const COLLAPSED_LINES = 6;
 
-// Agent names for @mention autocomplete
+// 18-Agent Discussion Panel Architecture
 const AGENT_NAMES = [
-    'Alex', 'Marcus', 'Greta', 'David', 'Emma', 'Diana',
-    'Lisa', 'Tom', 'James', 'Sarah', 'Robert', 'Victoria'
+    // Orchestrator
+    'Alex',
+    // Section Agents (13)
+    'Diana', 'Sam', 'Raj', 'Vera', 'Carla', 'Tara',
+    'Frank', 'Cameron', 'Rita', 'Brianna', 'Eddie', 'Clara', 'Marcus',
+    // Analytical Support (3)
+    'Statler', 'Charley', 'Quincy',
+    // QC
+    'Victoria',
 ];
 
-// Agent color mapping for avatars
+// Agent color mapping for avatars (18 agents + User + System)
 const AGENT_COLORS: Record<string, string> = {
-    'Alex': '#57C7E3',      // Orchestrator - Cyan
-    'Victoria': '#F16667',   // QC - Red
-    'Marcus': '#FFE081',     // Synthesis - Yellow
-    'Robert': '#FFE081',     // Risk - Yellow
-    'Greta': '#F79767',      // Writer - Orange
-    'David': '#F79767',      // Writer - Orange
-    'Emma': '#F79767',       // Writer - Orange
-    'Diana': '#F79767',      // Writer - Orange
-    'Lisa': '#F79767',       // Writer - Orange
-    'Tom': '#F79767',        // Writer - Orange
-    'James': '#F79767',      // Writer - Orange
-    'Sarah': '#F79767',      // Writer - Orange
-    'User': '#9B8FE8',       // User - Purple
-    'System': '#8DCC93',     // System - Green
+    // Orchestrator
+    'Alex': '#6366f1',
+    // Section Agents
+    'Diana': '#FFE081',
+    'Sam': '#D9C8AE',
+    'Raj': '#F79767',
+    'Vera': '#F16667',
+    'Carla': '#DA7194',
+    'Tara': '#C990C0',
+    'Frank': '#8DCC93',
+    'Cameron': '#57C7E3',
+    'Rita': '#569480',
+    'Brianna': '#4C8EDA',
+    'Eddie': '#9b59b6',
+    'Clara': '#1abc9c',
+    'Marcus': '#e67e22',
+    // Analytical Support
+    'Statler': '#e74c3c',
+    'Charley': '#3498db',
+    'Quincy': '#2ecc71',
+    // QC
+    'Victoria': '#FFC454',
+    // Special
+    'User': '#9B8FE8',
+    'System': '#8DCC93',
 };
 
 // Agent Avatar Component
@@ -76,15 +94,33 @@ export const DiscussionForum: React.FC<DiscussionForumProps> = ({ sessionId }) =
     const [showMentionDropdown, setShowMentionDropdown] = useState(false);
     const [mentionFilter, setMentionFilter] = useState('');
     const [mentionIndex, setMentionIndex] = useState(0);
+    const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+    const [previewTitle, setPreviewTitle] = useState('');
+    const [previewLoading, setPreviewLoading] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+
+    const handlePreviewSection = async (sectionId: string) => {
+        setPreviewLoading(true);
+        try {
+            const data = await api.getSectionPreview(sessionId, sectionId);
+            setPreviewTitle(data.title || `Section ${sectionId}`);
+            setPreviewHtml(data.html || '<p>No content available</p>');
+        } catch (err) {
+            setPreviewHtml('<p>Preview not available yet.</p>');
+            setPreviewTitle(`Section ${sectionId}`);
+        } finally {
+            setPreviewLoading(false);
+        }
+    };
 
     const fetchMessages = useCallback(async () => {
         try {
             const data = await api.getMessages(sessionId);
             const list = Array.isArray(data) ? data : [];
-            setMessages(list.slice().reverse());
+            // API returns messages in chronological order already (oldest first)
+            setMessages(list);
         } catch (error) {
             console.error('Failed to fetch messages:', error);
         }
@@ -365,6 +401,19 @@ export const DiscussionForum: React.FC<DiscussionForumProps> = ({ sessionId }) =
                                             )}
                                         </button>
                                     )}
+                                    {/* Preview button for section completion messages */}
+                                    {msg.from_agent === 'Alex' && msg.message_type === 'success' && /Section\s+([A-M])\s/.test(msg.message) && (
+                                        <button
+                                            type="button"
+                                            className="message-card__preview-btn"
+                                            onClick={() => {
+                                                const match = msg.message.match(/Section\s+([A-M])/);
+                                                if (match) handlePreviewSection(match[1]);
+                                            }}
+                                        >
+                                            <Eye size={12} /> Preview
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         );
@@ -372,6 +421,27 @@ export const DiscussionForum: React.FC<DiscussionForumProps> = ({ sessionId }) =
                 )}
                 <div ref={messagesEndRef} className="chat-anchor" />
             </div>
+
+            {/* Section Preview Overlay */}
+            {previewHtml && (
+                <div className="section-preview-overlay">
+                    <div className="section-preview-header">
+                        <span className="section-preview-title">{previewTitle}</span>
+                        <button type="button" className="section-preview-close" onClick={() => setPreviewHtml(null)}>
+                            <X size={16} />
+                        </button>
+                    </div>
+                    <div
+                        className="section-preview-body"
+                        dangerouslySetInnerHTML={{ __html: previewHtml }}
+                    />
+                </div>
+            )}
+            {previewLoading && (
+                <div className="section-preview-loading">
+                    <Loader2 size={16} className="spin" /> Loading preview...
+                </div>
+            )}
 
             {/* Input Area */}
             <div className="chat-input-area">

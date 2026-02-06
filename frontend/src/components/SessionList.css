@@ -129,14 +129,30 @@
     border: 1px solid rgba(87, 199, 227, 0.2);
 }
 
-.session-status {
+/* Status indicator row */
+.session-status-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
     padding: 0.3rem 0.75rem;
+    background: var(--neo-bg-deep);
+    border: 1px solid var(--neo-border-subtle);
     border-radius: 20px;
-    font-size: 0.7rem;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.status-text {
+    font-size: 0.65rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #000;
+    color: var(--neo-text-secondary);
 }
 
 .session-card-body h3 {
